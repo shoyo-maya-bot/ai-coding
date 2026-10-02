@@ -1,0 +1,10 @@
+# ローカル開発（local/docker-compose.yml の DB と S3 エミュレータに接続）
+spring:
+  datasource:
+    password: ${DB_PASSWORD:localpass}
+app:
+  s3:
+    endpoint: ${S3_ENDPOINT:http://localhost:9090}
+logging:
+  level:
+    com.example.app: DEBUG

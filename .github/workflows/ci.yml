@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  java-gates:
+    name: D1-D5,D9 (Java)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: template
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon qualityGate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-reports
+          path: template/build/reports/
+
+  trace-gates:
+    name: D6-D8,D10,D11 (traceability)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "tools/spec-trace[dev]"
+      - name: tools tests
+        run: |
+          (cd tools/spec-trace && python -m pytest -q)
+          python -m pytest -q tests
+      - name: lint
+        run: ruff check tools scripts tests && ruff format --check tools scripts tests
+      - name: spec-trace (all requirements proven, no drift)
+        run: spec-trace check traceability/specs --root . --require proven --enforce-drift -f markdown
+      - name: authority graph
+        run: python scripts/verify_authority.py

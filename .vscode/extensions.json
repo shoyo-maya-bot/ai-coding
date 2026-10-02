@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "vscjava.vscode-java-pack",
+    "vmware.vscode-boot-dev-pack",
+    "github.copilot-chat",
+    "charliermarsh.ruff",
+    "ms-python.python"
+  ]
+}

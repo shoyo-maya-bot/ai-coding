@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spec-trace"
+version = "0.1.0"
+description = "仕様（要件）と実装・テストの対応表を検証し、裏付けのない「実装済み」「テスト済み」を検出する"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "devtools-common @ git+https://github.com/shoyo-maya-bot/devtools-common.git@bfb7f17c5016966058072f4aba3713ab56d146ba",  # コミット SHA で固定
+  "jsonschema>=4.18",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+spec-trace = "spec_trace.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+spec_trace = ["schemas/*.json"]
+
+# 組織共通の lint / format 設定（全ツールで同一に保つ。変えるときはテンプレートから直す）
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

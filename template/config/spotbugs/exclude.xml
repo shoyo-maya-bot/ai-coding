@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs の除外。追加するときは必ず理由をコメントに書き、レビューで承認を得る（安易な除外は禁止） -->
+<FindBugsFilter>
+  <!-- Spring が注入する Bean を保持するだけのフィールドは、内部表現の公開に当たらない -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+    <Class name="~com\.example\.app\..*(Controller|Service|Job|Fetcher|Handler)"/>
+  </Match>
+  <!-- レコードの List 項目はコンストラクタで List.copyOf により不変化している -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    <Class name="~com\.example\.app\..*\.(ErrorResponse|ImportResult)"/>
+  </Match>
+  <!-- バッチの終了コードを OS に返すため、起動クラスだけは System.exit を使う -->
+  <Match>
+    <Bug pattern="DM_EXIT"/>
+    <Class name="com.example.app.AppApplication"/>
+  </Match>
+</FindBugsFilter>

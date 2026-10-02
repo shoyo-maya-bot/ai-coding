@@ -1,0 +1,18 @@
+package com.example.app.common;
+
+/**
+ * メッセージ ID の一覧（本文は messages.properties）.
+ *
+ * <p>形式: APP + 種別（I=情報 / W=警告 / E=エラー）+ 4 桁。実案件では社内のメッセージ体系に置き換える。
+ */
+public final class MessageIds {
+
+    public static final String INVALID_INPUT = "APPE0001";
+    public static final String MEMBER_NOT_FOUND = "APPE0002";
+    public static final String EMAIL_ALREADY_USED = "APPE0003";
+    public static final String IMPORT_STARTED = "APPI0001";
+    public static final String IMPORT_FINISHED = "APPI0002";
+    public static final String IMPORT_LINE_SKIPPED = "APPW0001";
+
+    private MessageIds() {}
+}

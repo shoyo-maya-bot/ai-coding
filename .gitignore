@@ -1,0 +1,30 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+backend.hcl
+# build
+build/
+.gradle/
+out/
+*.class
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+plan.out
+.terraform.lock.hcl
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.iml
+.DS_Store
+Thumbs.db
+# python
+__pycache__/
+*.egg-info/
+.venv/
+.ruff_cache/

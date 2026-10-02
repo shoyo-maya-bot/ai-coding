@@ -1,0 +1,139 @@
+// 生成先プロジェクトの雛形。AI が生成したコードはこのプロジェクトの品質ゲートを通す。
+// ゲートの一覧と根拠は ../guidelines/quality-gates.md（ここを変えたらそちらも更新する）
+plugins {
+    id 'java'
+    id 'jacoco'
+    id 'checkstyle'
+    id 'org.springframework.boot' version '4.0.7'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.github.spotbugs' version '6.1.7'
+}
+
+group = 'com.example'
+version = '0.1.0'
+
+// D1 コンパイル: Java 17 向け。警告も表示する
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-parameters', '-Xlint:all,-processing,-serial']
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.0.1'
+    implementation platform('software.amazon.awssdk:bom:2.29.0')
+    implementation 'software.amazon.awssdk:s3'
+    runtimeOnly 'org.postgresql:postgresql'
+    compileOnly 'com.github.spotbugs:spotbugs-annotations:4.9.3'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.karatelabs:karate-junit5:1.5.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// D2 静的解析（規約）: config/checkstyle/checkstyle.xml。警告 1 件でも失敗
+checkstyle {
+    toolVersion = '10.21.0'
+    maxWarnings = 0
+    ignoreFailures = false
+}
+
+// D5 静的解析（バグパターン・セキュリティ）: SpotBugs。除外は config/spotbugs/exclude.xml に理由付きで書く
+spotbugs {
+    ignoreFailures = false
+    effort = com.github.spotbugs.snom.Effort.MAX
+    reportLevel = com.github.spotbugs.snom.Confidence.MEDIUM
+    excludeFilter = file('config/spotbugs/exclude.xml')
+}
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+    reports {
+        html.required = true
+        xml.required = false
+    }
+}
+tasks.named('spotbugsTest') { enabled = false }
+
+// D3 単体テスト（Karate は除く）
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'karate'
+    }
+    finalizedBy jacocoTestReport
+}
+
+tasks.register('karateTest', Test) {
+    description = 'Karate による API テスト（アプリを先に起動しておく）'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'karate'
+    }
+    systemProperty 'karate.env', System.getProperty('karate.env', 'local')
+    outputs.upToDateWhen { false }
+}
+
+jacocoTestReport {
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+// D4 カバレッジ: 業務ロジック（Service とバッチ）の分岐網羅率。目標は 100%。段階的に引き上げる
+def coverageTargets = ['com/example/app/**/*Service.class', 'com/example/app/**/batch/*Job.class']
+def branchMinimum = (project.findProperty('branchCoverageMinimum') ?: '0.80') as BigDecimal
+jacocoTestCoverageVerification {
+    dependsOn test
+    classDirectories.setFrom(files(classDirectories.files.collect {
+        fileTree(dir: it, includes: coverageTargets)
+    }))
+    violationRules {
+        rule {
+            limit {
+                counter = 'BRANCH'
+                value = 'COVEREDRATIO'
+                minimum = branchMinimum
+            }
+        }
+    }
+}
+
+// D9 SQL の安全性: Mapper XML で ${} による文字列埋め込みを禁止（SQL インジェクション対策。#{} を使う）
+tasks.register('verifyMapperSql') {
+    description = 'Mapper XML に ${...} が無いことを確かめる'
+    group = 'verification'
+    def xmls = fileTree('src/main/resources/mapper') { include '**/*.xml' }
+    inputs.files(xmls)
+    doLast {
+        def bad = []
+        xmls.each { f ->
+            f.readLines('UTF-8').eachWithIndex { line, i ->
+                if (line.contains('${')) {
+                    bad << "${f.name}:${i + 1}: ${line.trim()}"
+                }
+            }
+        }
+        if (bad) {
+            throw new GradleException("Mapper XML で \${} は使えません（#{} を使う）:\n" + bad.join('\n'))
+        }
+    }
+}
+
+// 決定論ゲートのまとめ（トレーサビリティ検証は ../scripts/verify-gates.sh が続けて実行する）
+tasks.register('qualityGate') {
+    description = 'D1〜D5・D9 をまとめて実行する'
+    group = 'verification'
+    dependsOn 'compileJava', 'checkstyleMain', 'checkstyleTest', 'test', 'jacocoTestCoverageVerification',
+            'spotbugsMain', 'verifyMapperSql'
+}
+
+tasks.named('check') {
+    dependsOn 'jacocoTestCoverageVerification', 'verifyMapperSql'
+}
