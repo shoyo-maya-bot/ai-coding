@@ -15,7 +15,10 @@
   <module name="TreeWalker">
     <!-- 命名 -->
     <module name="TypeName"/>
-    <module name="MethodName"/>
+    <!-- テストメソッドは 対象_条件_期待 の形を許す -->
+    <module name="MethodName">
+      <property name="format" value="^[a-z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$"/>
+    </module>
     <module name="LocalVariableName"/>
     <module name="MemberName"/>
     <module name="ParameterName"/>
