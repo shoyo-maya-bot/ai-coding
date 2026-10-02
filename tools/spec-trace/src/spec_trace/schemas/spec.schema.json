@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shoyo-maya-bot/spec-trace/spec.schema.json",
+  "title": "spec-trace トレーサビリティ定義（1 機能 = 1 ファイル）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["spec_id", "requirements"],
+  "properties": {
+    "spec_id": {"type": "string", "minLength": 1, "description": "機能・ジョブ・API の識別子（例: FEAT-ORDER-IMPORT）"},
+    "title": {"type": "string"},
+    "source": {"type": "string", "description": "根拠の設計書（--root からの相対パス）"},
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "承認時点の設計書の SHA-256。spec-trace pin で記録し、check で現在の設計書と照合する"
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "description": "要件 ID（例: REQ-ORDER-001）"},
+          "source": {"type": "string", "description": "設計書内の位置（例: order-import.md#STEP2）"},
+          "type": {"type": "string", "description": "分類（step / crud / validation / message / parameter / business-rule など自由）"},
+          "description": {"type": "string", "minLength": 1},
+          "status": {"enum": ["pending", "implemented", "proven"], "description": "pending → implemented → proven"},
+          "implements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file"],
+              "properties": {
+                "file": {"type": "string"},
+                "symbol": {"type": "string", "description": "関数名、または クラス名#メソッド名 / クラス名.メソッド名"}
+              }
+            }
+          },
+          "proofs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file"],
+              "properties": {
+                "file": {"type": "string", "description": "テストファイル、または Gherkin の .feature"},
+                "symbol": {"type": "string", "description": "テスト関数（クラス名#メソッド名 可）。.feature では使わない"},
+                "scenario": {"type": "string", "description": ".feature のシナリオ名"},
+                "type": {"type": "string", "description": "normal / abnormal / boundary など自由"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

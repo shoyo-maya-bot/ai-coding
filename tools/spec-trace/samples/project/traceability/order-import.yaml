@@ -1,0 +1,46 @@
+# 受注ファイル取込のトレーサビリティ定義（1 機能 = 1 ファイル）
+# status: pending（未着手）→ implemented（実装済み: implements が実在）→ proven（テスト済み: proofs が実在し検証あり）
+spec_id: "FEAT-ORDER-IMPORT"
+title: "受注ファイル取込"
+source: "docs/design/order-import.md"
+source_sha256: "ec460aa72ef56e0a3393f3e22fbb4551bbc30797f3afffb7a45d5667cbf0bbe4"
+requirements:
+  - id: "REQ-ORDER-001"
+    source: "order-import.md#STEP1"
+    type: "validation"
+    description: "受注番号・数量の必須チェック（数量は 1 以上）"
+    status: "proven"
+    implements:
+      - file: "src/order_import.py"
+        symbol: "OrderValidator#validate"
+    proofs:
+      - file: "tests/test_order_import.py"
+        symbol: "TestOrderValidator#test_required"
+        type: "abnormal"
+  - id: "REQ-ORDER-002"
+    source: "order-import.md#STEP2"
+    type: "business-rule"
+    description: "既にある受注番号は登録しない（冪等）"
+    status: "proven"
+    implements:
+      - file: "src/order_import.py"
+        symbol: "import_orders"
+      - file: "java/main/OrderImportJob.java"
+        symbol: "OrderImportJob#importOrders"
+    proofs:
+      - file: "tests/test_order_import.py"
+        symbol: "test_import_is_idempotent"
+      - file: "java/test/OrderImportJobTest.java"
+        symbol: "OrderImportJobTest#importOrders_skipsExisting"
+  - id: "REQ-ORDER-003"
+    source: "order-import.md#STEP3"
+    type: "step"
+    description: "取込件数とエラー件数を結果ファイルに出力する"
+    status: "proven"
+    implements:
+      - file: "java/main/OrderImportJob.java"
+        symbol: "OrderImportJob"
+    proofs:
+      - file: "e2e/order-import.feature"
+        scenario: "結果ファイルに件数が出る"
+        type: "normal"

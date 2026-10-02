@@ -1,0 +1,4 @@
+# バッチとして起動する（Web サーバーを立てず、ジョブが終わったら終了する）
+spring:
+  main:
+    web-application-type: none

@@ -1,0 +1,68 @@
+package com.example.app.member;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.example.app.common.BusinessException;
+import com.example.app.common.MessageIds;
+import com.example.app.common.NotFoundException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+
+class MemberServiceTest {
+
+    /** DB を使わない差し替え用の Mapper. */
+    static class InMemoryMapper implements MemberMapper {
+        final Map<Long, Member> rows = new HashMap<>();
+        long seq = 0;
+
+        @Override
+        public Optional<Member> findById(long id) {
+            return Optional.ofNullable(rows.get(id));
+        }
+
+        @Override
+        public boolean existsByEmail(String email) {
+            return rows.values().stream().anyMatch(m -> m.email().equals(email));
+        }
+
+        @Override
+        public int insert(MemberRecord member) {
+            member.setId(++seq);
+            rows.put(member.getId(), member.toMember());
+            return 1;
+        }
+    }
+
+    private final InMemoryMapper mapper = new InMemoryMapper();
+    private final MemberService service = new MemberService(mapper);
+
+    @Test
+    void register_normalizesEmailAndAssignsId() {
+        Member m = service.register(" 山田 太郎 ", " Taro@Example.COM ");
+
+        assertThat(m.id()).isEqualTo(1L);
+        assertThat(m.name()).isEqualTo("山田 太郎");
+        assertThat(m.email()).isEqualTo("taro@example.com");
+    }
+
+    @Test
+    void register_rejectsDuplicateEmailIgnoringCase() {
+        service.register("A", "a@example.com");
+
+        assertThatThrownBy(() -> service.register("B", "A@EXAMPLE.com"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getMessageId())
+                .isEqualTo(MessageIds.EMAIL_ALREADY_USED);
+    }
+
+    @Test
+    void get_throwsNotFoundForUnknownId() {
+        assertThatThrownBy(() -> service.get(99))
+                .isInstanceOf(NotFoundException.class)
+                .extracting(e -> ((NotFoundException) e).getMessageId())
+                .isEqualTo(MessageIds.MEMBER_NOT_FOUND);
+    }
+}

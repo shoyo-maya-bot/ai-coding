@@ -1,0 +1,11 @@
+# 設計書の参照ルール
+# エージェントは設計書を Front Matter の id で特定する（ファイル名やフォルダ構成に頼らない）。
+# 実案件では設計書を別リポジトリに置き、このリポジトリの隣に clone して roots を書き換える。
+roots:
+  - path: samples/design-docs          # このリポジトリ同梱のサンプル
+  # - path: ../design-docs             # 例: 設計書リポジトリ（doc-to-markdown で Markdown 化したもの）
+id_field: id
+approved_status: approved              # この status の設計書だけを実装に使う
+types:
+  batch: { template: guidelines/templates/batch-module.md }
+  api: { template: guidelines/templates/api-module.md }

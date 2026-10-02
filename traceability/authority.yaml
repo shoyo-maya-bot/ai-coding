@@ -1,0 +1,87 @@
+# 権限のグラフ: ガイドラインのルール ↔ 品質ゲートのチェック
+# - 根拠ルールの無いチェック（越権）、チェックの無い machine ルール（空文化）を scripts/verify_authority.py が検出する
+# enforcement: machine（ゲートで機械判定）/ ai（非決定論ゲート）/ human（人のレビュー）
+rules:
+  - id: R-COMPILE
+    source: guidelines/coding-standards.md#その他
+    enforcement: machine
+  - id: R-NAMING
+    source: guidelines/coding-standards.md#命名
+    enforcement: machine
+  - id: R-LOGGING
+    source: guidelines/coding-standards.md#ログ
+    enforcement: machine
+  - id: R-SQL-BIND
+    source: guidelines/coding-standards.md#SQL（MyBatis）
+    enforcement: machine
+  - id: R-TEST-PASS
+    source: guidelines/coding-standards.md#テスト
+    enforcement: machine
+  - id: R-COVERAGE
+    source: guidelines/ai-principles.md#単体テストコードの使いどころ
+    enforcement: machine
+  - id: R-BUG-PATTERN
+    source: guidelines/coding-standards.md#例外とメッセージ
+    enforcement: machine
+  - id: R-TRACE-EXISTS
+    source: guidelines/traceability.md#状態の決め方
+    enforcement: machine
+  - id: R-TRACE-ASSERT
+    source: guidelines/coding-standards.md#テスト
+    enforcement: machine
+  - id: R-DRIFT
+    source: guidelines/traceability.md#設計書との関係
+    enforcement: machine
+  - id: R-AUTHORITY
+    source: guidelines/traceability.md#2 つのグラフ
+    enforcement: machine
+  - id: R-LAYER
+    source: guidelines/coding-standards.md#層の責務
+    enforcement: human
+  - id: R-DESIGN-COVERAGE
+    source: guidelines/quality-gates.md#非決定論ゲート（AI レビュー。reviewer エージェントが判定表を出す）
+    enforcement: ai
+  - id: R-TEST-FROM-DESIGN
+    source: guidelines/coding-standards.md#テスト
+    enforcement: human
+
+checks:
+  - id: D1
+    rules: [R-COMPILE]
+    implemented_by: compileJava
+  - id: D2
+    rules: [R-NAMING, R-LOGGING]
+    implemented_by: checkstyleMain
+  - id: D3
+    rules: [R-TEST-PASS]
+    implemented_by: test
+  - id: D4
+    rules: [R-COVERAGE]
+    implemented_by: jacocoTestCoverageVerification
+  - id: D5
+    rules: [R-BUG-PATTERN]
+    implemented_by: spotbugsMain
+  - id: D6
+    rules: [R-TRACE-EXISTS]
+    implemented_by: spec-trace
+  - id: D7
+    rules: [R-TRACE-ASSERT]
+    implemented_by: spec-trace
+  - id: D8
+    rules: [R-DRIFT]
+    implemented_by: spec-trace
+  - id: D9
+    rules: [R-SQL-BIND]
+    implemented_by: verifyMapperSql
+  - id: D10
+    rules: [R-TRACE-ASSERT]
+    implemented_by: spec-trace
+  - id: D11
+    rules: [R-AUTHORITY]
+    implemented_by: verify_authority.py
+  - id: N1
+    rules: [R-DESIGN-COVERAGE]
+    implemented_by: reviewer
+  - id: N6
+    rules: [R-TEST-FROM-DESIGN]
+    implemented_by: reviewer
