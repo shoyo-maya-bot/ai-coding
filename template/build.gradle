@@ -47,8 +47,8 @@ checkstyle {
 // D5 静的解析（バグパターン・セキュリティ）: SpotBugs。除外は config/spotbugs/exclude.xml に理由付きで書く
 spotbugs {
     ignoreFailures = false
-    effort = com.github.spotbugs.snom.Effort.MAX
-    reportLevel = com.github.spotbugs.snom.Confidence.MEDIUM
+    effort = com.github.spotbugs.snom.Effort.valueOf('MAX')
+    reportLevel = com.github.spotbugs.snom.Confidence.valueOf('MEDIUM')
     excludeFilter = file('config/spotbugs/exclude.xml')
 }
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
