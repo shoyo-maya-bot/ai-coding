@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/shoyo-maya-bot/spec-trace/spec.schema.json",
+  "$id": "https://github.com/shoyo-maya-bot/ai-coding/tools/spec-trace/spec.schema.json",
   "title": "spec-trace トレーサビリティ定義（1 機能 = 1 ファイル）",
   "type": "object",
   "additionalProperties": false,
