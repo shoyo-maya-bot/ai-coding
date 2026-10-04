@@ -10,6 +10,16 @@ public final class MessageIds {
     public static final String INVALID_INPUT = "APPE0001";
     public static final String MEMBER_NOT_FOUND = "APPE0002";
     public static final String EMAIL_ALREADY_USED = "APPE0003";
+    /** API: 入力チェック以外の理由で受け付けられない（型違い・JSON の誤り・未対応のメソッドなど）. */
+    public static final String REQUEST_REJECTED = "APPE0004";
+    /** バッチ: 起動引数の誤り. */
+    public static final String BATCH_INVALID_ARGS = "APPE0005";
+    /** バッチ: ジョブ ID の誤り・未指定. */
+    public static final String BATCH_UNKNOWN_JOB = "APPE0006";
+    /** バッチ: 異常終了. */
+    public static final String BATCH_FAILED = "APPE0007";
+    /** 想定外のエラー（詳細はログにだけ出す）. */
+    public static final String SYSTEM_ERROR = "APPE9999";
     public static final String IMPORT_STARTED = "APPI0001";
     public static final String IMPORT_FINISHED = "APPI0002";
     public static final String IMPORT_LINE_SKIPPED = "APPW0001";

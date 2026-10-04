@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 class MemberServiceTest {
 
@@ -53,6 +54,22 @@ class MemberServiceTest {
         service.register("A", "a@example.com");
 
         assertThatThrownBy(() -> service.register("B", "A@EXAMPLE.com"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getMessageId())
+                .isEqualTo(MessageIds.EMAIL_ALREADY_USED);
+    }
+
+    @Test
+    void register_concurrentDuplicateBecomesBusinessError() {
+        // 事前の確認をすり抜けた（同時に登録された）ケース: DB の一意制約で失敗しても 409 の業務エラーにする
+        MemberMapper racing = new InMemoryMapper() {
+            @Override
+            public int insert(MemberRecord member) {
+                throw new DuplicateKeyException("member_email_key");
+            }
+        };
+
+        assertThatThrownBy(() -> new MemberService(racing).register("A", "a@example.com"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getMessageId())
                 .isEqualTo(MessageIds.EMAIL_ALREADY_USED);

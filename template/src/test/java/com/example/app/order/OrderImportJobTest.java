@@ -10,7 +10,7 @@ import org.springframework.boot.DefaultApplicationArguments;
 
 class OrderImportJobTest {
 
-    private final OrderImportService service = new OrderImportService(o -> 1);
+    private final OrderImportService service = new OrderImportService(new FakeOrderMapper());
 
     @Test
     void exitCodeZeroWhenAllLinesValid() {

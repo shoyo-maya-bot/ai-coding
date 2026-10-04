@@ -8,4 +8,8 @@
     VALUES (#{orderNo}, #{memberId}, #{productCode}, #{quantity})
     ON CONFLICT (order_no) DO NOTHING
   </insert>
+
+  <select id="memberExists" resultType="boolean">
+    SELECT EXISTS (SELECT 1 FROM member WHERE id = #{memberId})
+  </select>
 </mapper>
