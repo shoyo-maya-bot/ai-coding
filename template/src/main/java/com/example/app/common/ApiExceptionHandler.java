@@ -1,14 +1,18 @@
 package com.example.app.common;
 
+import java.net.ConnectException;
+import java.sql.SQLTransientConnectionException;
 import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,7 +22,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * 例外を API のエラー応答（ステータス + メッセージ ID）に変換する.
  *
  * <p>どの失敗でも {@link ErrorResponse} の形で返す（利用側が 1 つの形だけを扱えばよいように）。
- * 想定外のエラーは 500 と APPE9999 だけを返し、例外の中身はログにだけ出す。
+ * DB につながらないときは 503 と APPE0008、想定外のエラーは 500 と APPE9999 だけを返し、例外の中身はログにだけ出す。
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -77,8 +81,34 @@ public class ApiExceptionHandler {
                 && framework.getStatusCode().is4xxClientError()) {
             return body(framework.getStatusCode(), MessageIds.REQUEST_REJECTED, new Object[0], List.of());
         }
+        if (isUnavailable(e)) {
+            // DB が止まっている・つながらない: 利用者の誤りでもアプリの不具合でもないので 503 で返す（再試行してよい）
+            log.error("{} 依存先につながりません: {}", MessageIds.SERVICE_UNAVAILABLE, rootMessage(e), e);
+            return body(HttpStatus.SERVICE_UNAVAILABLE, MessageIds.SERVICE_UNAVAILABLE, new Object[0], List.of());
+        }
         log.error("{} 想定外のエラー", MessageIds.SYSTEM_ERROR, e);
         return body(HttpStatus.INTERNAL_SERVER_ERROR, MessageIds.SYSTEM_ERROR, new Object[0], List.of());
+    }
+
+    /** 一時的に依存先（DB）へつながらないことによる失敗か. 原因の連鎖もたどる. */
+    static boolean isUnavailable(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof CannotCreateTransactionException
+                    || t instanceof DataAccessResourceFailureException
+                    || t instanceof SQLTransientConnectionException
+                    || t instanceof ConnectException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String rootMessage(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) {
+            t = t.getCause();
+        }
+        return t.getClass().getSimpleName() + ": " + t.getMessage();
     }
 
     private ResponseEntity<ErrorResponse> body(HttpStatusCode status, String id, Object[] args, List<String> details) {
