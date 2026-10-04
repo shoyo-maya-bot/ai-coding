@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=9.1.1", "ruff>=0.6"]
 
 [project.scripts]
 spec-trace = "spec_trace.cli:entrypoint"
