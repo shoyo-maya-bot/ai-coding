@@ -18,6 +18,8 @@ public final class MessageIds {
     public static final String BATCH_UNKNOWN_JOB = "APPE0006";
     /** バッチ: 異常終了. */
     public static final String BATCH_FAILED = "APPE0007";
+    /** API: DB など依存先に一時的につながらない（503）. */
+    public static final String SERVICE_UNAVAILABLE = "APPE0008";
     /** 想定外のエラー（詳細はログにだけ出す）. */
     public static final String SYSTEM_ERROR = "APPE9999";
     public static final String IMPORT_STARTED = "APPI0001";

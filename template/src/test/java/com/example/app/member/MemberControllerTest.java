@@ -7,12 +7,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.app.common.ApiExceptionHandler;
+import java.sql.SQLTransientConnectionException;
 import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
@@ -112,5 +115,34 @@ class MemberControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.messageId").value("APPE9999"))
                 .andExpect(jsonPath("$.details.length()").value(0));
+    }
+
+    @Test
+    void databaseDownReturns503() throws Exception {
+        MockMvc down = build(new MemberServiceTest.InMemoryMapper() {
+            @Override
+            public Optional<Member> findById(long id) {
+                throw new CannotGetJdbcConnectionException("Failed to obtain JDBC Connection",
+                        new SQLTransientConnectionException("Connection refused"));
+            }
+        });
+        down.perform(get("/api/v1/members/1"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.messageId").value("APPE0008"))
+                .andExpect(jsonPath("$.details.length()").value(0));
+    }
+
+    @Test
+    void transactionCannotStartReturns503() throws Exception {
+        MockMvc down = build(new MemberServiceTest.InMemoryMapper() {
+            @Override
+            public Optional<Member> findById(long id) {
+                throw new CannotCreateTransactionException("Could not open JDBC Connection for transaction",
+                        new java.net.ConnectException("Connection refused"));
+            }
+        });
+        down.perform(get("/api/v1/members/1"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.messageId").value("APPE0008"));
     }
 }
