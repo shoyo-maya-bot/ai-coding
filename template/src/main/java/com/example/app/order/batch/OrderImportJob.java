@@ -1,5 +1,6 @@
 package com.example.app.order.batch;
 
+import com.example.app.batch.BatchJob;
 import com.example.app.common.MessageIds;
 import com.example.app.order.ImportResult;
 import com.example.app.order.OrderImportService;
@@ -18,14 +19,13 @@ import org.springframework.stereotype.Component;
  * <p>起動例: {@code --spring.profiles.active=local,batch --app.batch.job=JOB0001 --input=s3://sample-bucket/orders.csv}
  *
  * <p>終了コード: 0 正常 / 4 形式エラーの行あり（取込は続行）/ 8 異常終了。実案件では運用設計の終了コード体系に合わせる。
+ * ジョブ ID の誤り・未指定は {@link com.example.app.batch.BatchJobGuard} が 8 にする。
  */
 @Component
 @ConditionalOnProperty(name = "app.batch.job", havingValue = "JOB0001")
-public class OrderImportJob implements ApplicationRunner, ExitCodeGenerator {
+public class OrderImportJob implements BatchJob, ApplicationRunner, ExitCodeGenerator {
 
-    static final int OK = 0;
-    static final int WARN = 4;
-    static final int ERROR = 8;
+    static final String JOB_ID = "JOB0001";
 
     private static final Logger log = LoggerFactory.getLogger(OrderImportJob.class);
 
@@ -39,10 +39,15 @@ public class OrderImportJob implements ApplicationRunner, ExitCodeGenerator {
     }
 
     @Override
+    public String jobId() {
+        return JOB_ID;
+    }
+
+    @Override
     public void run(ApplicationArguments args) {
         List<String> input = args.getOptionValues("input");
         if (input == null || input.size() != 1) {
-            log.error("{} 引数 --input=<s3://バケット/キー またはファイル> が必要です", MessageIds.INVALID_INPUT);
+            log.error("{} JOB0001 引数 --input=<s3://バケット/キー またはファイル> が必要です", MessageIds.BATCH_INVALID_ARGS);
             exitCode = ERROR;
             return;
         }
@@ -54,7 +59,7 @@ public class OrderImportJob implements ApplicationRunner, ExitCodeGenerator {
                     MessageIds.IMPORT_FINISHED, r.imported(), r.duplicated(), r.errors().size());
             exitCode = r.hasErrors() ? WARN : OK;
         } catch (Exception e) {
-            log.error("JOB0001 異常終了", e);
+            log.error("{} JOB0001 異常終了", MessageIds.BATCH_FAILED, e);
             exitCode = ERROR;
         }
     }

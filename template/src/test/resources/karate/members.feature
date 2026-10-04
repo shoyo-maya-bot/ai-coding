@@ -34,3 +34,9 @@ Feature: 会員 API（API0001 照会 / API0002 登録）
     When method get
     Then status 404
     And match response.messageId == 'APPE0002'
+
+  Scenario: ID の形式が誤っていれば 400（エラーの形はほかと同じ）
+    Given path '/api/v1/members', 'abc'
+    When method get
+    Then status 400
+    And match response == { messageId: 'APPE0001', message: '#string', details: '#[1]' }

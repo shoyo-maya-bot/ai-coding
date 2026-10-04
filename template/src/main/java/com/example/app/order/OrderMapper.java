@@ -12,4 +12,7 @@ public interface OrderMapper {
      * @return 登録した件数（既にあれば 0）
      */
     int insertIfAbsent(Order order);
+
+    /** 会員が存在するか（外部キー違反で取込全体が取り消されないよう、登録の前に確かめる）. */
+    boolean memberExists(long memberId);
 }
