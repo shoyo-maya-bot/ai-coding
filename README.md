@@ -70,7 +70,7 @@ ai-coding/
 │   ├── specs/                    # 要件 ↔ 実装 ↔ テストの対応表（1 機能 1 ファイル）
 │   └── authority.yaml            # ルール ↔ チェックの対応表
 ├── tools/spec-trace/             # 対応表の検証ツール
-├── scripts/                      # verify-gates（CI と同じ順）、verify_authority
+├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs
 ├── samples/design-docs/          # 架空の設計書（Front Matter の id で参照）
 ├── eval/                         # 評価ループ（ラン記録・指標）
 └── context-sources.yaml          # 設計書の置き場と参照ルール
@@ -86,6 +86,16 @@ ai-coding/
 | D4 | 分岐網羅（Service・Job） | D10 | Karate シナリオの実在・有効性 |
 | D5 | SpotBugs | D11 | ルールとチェックの対応（越権・空文化の検出） |
 | D6 | 実装の実在 | N1〜N6 | AI レビュー（設計書との突合。補助） |
+
+このほか CI の `docs` ジョブで、ドキュメントと設定ファイルを検査します（`python scripts/check_docs.py`、ネットワーク不要）。
+
+- Markdown の相対リンクとアンカー（`#見出し`）がリポジトリ内で解決できること
+- `context-sources.yaml` の `roots` のフォルダと `types` のテンプレートが実在すること
+- YAML・JSON がすべて読めること
+- Copilot のファイルの Front Matter が読め、必須キーがあること（`*.instructions.md` は `applyTo`、`*.prompt.md`・`*.agent.md` は `description`、`SKILL.md` は `name`（フォルダ名と同じ）と `description`）
+
+CI の Actions はコミット SHA で固定し（横にバージョンを書く）、権限は `contents: read` だけにしています。
+更新は Dependabot（[.github/dependabot.yml](.github/dependabot.yml)）が月 1 回 PR で提案します。
 
 ## 関連リポジトリ
 
