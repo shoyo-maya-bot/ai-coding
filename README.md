@@ -103,3 +103,8 @@ CI の Actions はコミット SHA で固定し（横にバージョンを書く
 - [doc-to-markdown](https://github.com/shoyo-maya-bot/doc-to-markdown): Excel 等の設計書を Markdown に
 - [office-review](https://github.com/shoyo-maya-bot/office-review): 設計書のレビュー
 - [quality-analytics](https://github.com/shoyo-maya-bot/quality-analytics): レビュー指摘の分析
+
+## セキュリティ・ライセンス
+
+- 脆弱性を見つけたら、公開の Issue ではなく [SECURITY.md](SECURITY.md) の方法で知らせてください
+- ライセンスは [MIT](LICENSE) です
