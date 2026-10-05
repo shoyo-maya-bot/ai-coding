@@ -14,6 +14,7 @@ Run 'D1-D5,D9 Java' { Push-Location template; .\gradlew.bat --no-daemon -q quali
 $req = if ($Final) { @('--require', 'proven') } else { @() }
 Run 'D6-D8,D10 trace' { & $py -m spec_trace check traceability/specs --root . --enforce-drift @req }
 Run 'D11 authority' { & $py scripts/verify_authority.py }
+Run 'docs' { & $py scripts/check_docs.py }
 $results | Format-Table -AutoSize
 if ($results.Result -contains 'FAIL') { Write-Host 'FAIL があります。原因を直してください（チェックを甘くして通さない）。' -ForegroundColor Red; exit 1 }
 Write-Host 'すべてのゲートを通過しました。' -ForegroundColor Green

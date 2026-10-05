@@ -17,6 +17,7 @@ run() {
 run "D1-D5,D9 Java" bash -c "cd template && ./gradlew --no-daemon -q qualityGate"
 run "D6-D8,D10 trace" "$PY" -m spec_trace check traceability/specs --root . --enforce-drift $REQUIRE
 run "D11 authority" "$PY" scripts/verify_authority.py
+run "docs" "$PY" scripts/check_docs.py
 echo; echo "| ゲート | 結果 |"; echo "|---|---|"; printf '%s\n' "${results[@]}"
 if printf '%s\n' "${results[@]}" | grep -q FAIL; then
   echo; echo "FAIL があります。原因を直してください（チェックを甘くして通さない）。"; exit 1
