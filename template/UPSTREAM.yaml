@@ -1,0 +1,87 @@
+# template/ の写し元と、わざと違えている箇所
+# scripts/check_template_drift.py（CI の template-drift）がこれを読み、ここに無い差分があれば失敗する。
+# 写し元を新しくするとき: --ref main で差分を見て template に取り込み（または理由を書き）、sha を更新する。
+repo: shoyo-maya-bot/dev-environment
+sha: 49d093f0a2b1604de223ebe80d9d62ad7523e6a4
+
+# 写し元のディレクトリ → template 内のディレクトリ
+mappings:
+  - upstream: sample-app
+    template: .
+  - upstream: local
+    template: local
+
+# パスと中身の両方で置き換える（上から順に適用）
+rename:
+  - from: com.example.sample
+    to: com.example.app
+  - from: com/example/sample
+    to: com/example/app
+  - from: SampleApplication
+    to: AppApplication
+
+# 比べないもの（ビルド成果物など）
+ignore:
+  - build/
+  - .gradle/
+  - .idea/
+  - bin/
+
+allowed_differences:
+  - path: build.gradle
+    kind: modified
+    reason: >-
+      品質ゲート D1〜D5・D9（Checkstyle・SpotBugs・カバレッジ閾値・Mapper XML 検査・qualityGate タスク）を足している。
+      ゲートの一覧は guidelines/quality-gates.md。プラグインと依存ライブラリの版は写し元に揃え続ける（keep_in_sync）
+    keep_in_sync:
+      - "^\\s*id '[^']+' version "
+      - "^\\s*(implementation|runtimeOnly|compileOnly|annotationProcessor|testImplementation|testRuntimeOnly)\\b"
+  - path: settings.gradle
+    kind: replace
+    replace:
+      - from: "'sample-app'"
+        to: "'app'"
+    reason: 生成先プロジェクトの雛形なので、プロジェクト名をサンプル固有の名前から汎用名にしている
+  - path: src/main/resources/application.yml
+    kind: replace
+    replace:
+      - from: "name: sample-app"
+        to: "name: app"
+    reason: アプリ名を汎用名にしている（settings.gradle と同じ理由）
+  - path: local/docker-compose.yml
+    kind: replace
+    replace:
+      - from: "name: sample-dev"
+        to: "name: app-dev"
+    reason: Compose のプロジェクト名を変え、dev-environment のサンプルと同じ PC で同時に起動してもコンテナ名がぶつからないようにしている
+  - path: src/main/java/com/example/app/AppApplication.java
+    kind: replace
+    replace:
+      - from: サンプルアプリの起動クラス.
+        to: アプリの起動クラス.
+    reason: 起動クラスの説明からサンプル固有の言い回しを外している
+  - path: src/main/java/com/example/app/common/ErrorResponse.java
+    kind: modified
+    reason: >-
+      D5（SpotBugs）の EI_EXPOSE_REP 対策で、コンストラクタで List.copyOf して防御的コピーにしている。
+      写し元には SpotBugs が無いので入っていない
+  - path: src/main/java/com/example/app/order/ImportResult.java
+    kind: modified
+    reason: ErrorResponse と同じ（D5 の EI_EXPOSE_REP 対策の防御的コピー）
+  - path: src/main/java/com/example/app/order/batch/S3Config.java
+    kind: modified
+    reason: D2（Checkstyle）の行長制限に収めるため、長い 1 行を折り返している（処理は同じ）
+  - path: config/checkstyle/checkstyle.xml
+    kind: added
+    reason: D2（Checkstyle）の規約設定。写し元には静的解析が無い
+  - path: config/spotbugs/exclude.xml
+    kind: added
+    reason: D5（SpotBugs）の除外設定（除外ごとに理由付き）。写し元には静的解析が無い
+  - path: UPSTREAM.yaml
+    kind: added
+    reason: このファイル（写し元と許可差分の記録）
+  - path: local/README.md
+    kind: removed
+    reason: >-
+      PC の環境構築（WSL2・Rancher Desktop・Corretto の導入、../cloud/ への案内）の手順書で、
+      dev-environment のディレクトリ構成を前提にしているので雛形には持ち込まない（環境構築は dev-environment 側を見る）

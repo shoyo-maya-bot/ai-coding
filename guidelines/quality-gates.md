@@ -18,7 +18,25 @@
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある | `spec-trace check`（シナリオ） |
 | D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある | `scripts/verify_authority.py` |
 
-CI でマージ前に必須とするのは D1〜D11 全部です。完了時（PR 前）は `--require proven`（全要件がテスト済み）も付けます。
+CI でマージ前に必須とするのは D1〜D11 全部です。要件の状態は、PR では `--require implemented`（途中段階でも全要件が実装済み）、
+main への push では `--require proven`（全要件がテスト済み）を求めます。完了時（PR 前）は手元でも `--final`（`--require proven`）で確かめます。
+
+### 設計書を別リポジトリに置くとき（D8）
+
+D8 は設計書の実物が無いと判定できません。CI では設計書リポジトリも checkout し、ローカルと同じ「隣同士」の配置にします。
+例: [samples/ci/design-docs-drift.yml](../samples/ci/design-docs-drift.yml)
+
+- このリポジトリを `app/`、設計書リポジトリを `design-docs/` に checkout し、`app/` で `spec-trace check --root . --enforce-drift` を実行する
+- 対応表の `source` は `../design-docs/...`（`--root` からの相対）。[context-sources.yaml](../context-sources.yaml) の `roots` と揃える
+- 設計書リポジトリが private なら、読み取り専用のトークンを `secrets.DESIGN_DOCS_TOKEN` に登録して `actions/checkout` の `token` に渡す
+- `ref` は承認時のタグやコミット SHA にすると、設計書側の未承認の変更で CI が揺れない（main を追うと、設計書の更新が即 D8 で検知される）
+
+### template の写し元とのずれ
+
+`template/` は dev-environment の `sample-app` を写したものです。写し元の commit とわざと違えている箇所（理由付き）を
+[template/UPSTREAM.yaml](../template/UPSTREAM.yaml) に書き、CI の `template-drift` ジョブ（`python scripts/check_template_drift.py`）が
+それ以外の差分を検出します。依存ライブラリの版は `build.gradle` の `keep_in_sync` で写し元に揃え続けます。
+写し元を新しくするときは `--ref main` で差分を見てから取り込み、`sha` を更新します。
 
 ## 非決定論ゲート（AI レビュー。reviewer エージェントが判定表を出す）
 

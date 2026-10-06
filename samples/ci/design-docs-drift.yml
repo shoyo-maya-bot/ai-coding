@@ -1,0 +1,51 @@
+# 例: 設計書を別リポジトリに置いたときの CI（D8 設計書ドリフトを含む traceability ジョブ）
+# 使い方: .github/workflows/ci.yml の trace-gates ジョブをこの形に置き換える。説明は guidelines/quality-gates.md
+#
+# 前提
+# - ローカルと同じく、このリポジトリと設計書リポジトリを「隣同士」に置く（context-sources.yaml の ../design-docs）
+#   Actions では両方とも $GITHUB_WORKSPACE の下に置く必要があるので、app/ と design-docs/ に分けて checkout する
+# - 対応表の source は --root（app/）からの相対で "../design-docs/batch/JOB0001_xxx.md" のように書く
+# - 設計書リポジトリが private なら、読み取り専用のトークン（fine-grained PAT の Contents: Read、
+#   または GitHub App のトークン）を secrets.DESIGN_DOCS_TOKEN に登録する
+name: ci-design-docs-example
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  trace-gates:
+    name: D6-D8,D10,D11 (traceability)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: app
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: your-org/design-docs # 設計書リポジトリ
+          # 承認済みの設計書がある ref。ブランチより、承認時のタグ・コミット SHA の方が結果が再現できる
+          ref: main
+          path: design-docs
+          token: ${{ secrets.DESIGN_DOCS_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e "tools/spec-trace[dev]"
+      # 設計書が承認時（source_sha256）から変わっていれば trace.spec_drift で失敗する（D8）
+      - name: spec-trace (PR は implemented 以上、main は全要件 proven。ドリフト無し)
+        env:
+          REQUIRE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'proven' || 'implemented' }}
+        run: spec-trace check traceability/specs --root . --require "$REQUIRE" --enforce-drift -f markdown
+      - name: authority graph
+        run: python scripts/verify_authority.py

@@ -48,7 +48,7 @@ pip install -e tools/spec-trace            # 対応表の検証ツール
 
 1. このリポジトリを会社の GitHub に複製する
 2. `template/` の `com.example.app` を自分たちのパッケージに、`common/` を社内の共通ライブラリに置き換える
-3. 設計書リポジトリを隣に clone し、[context-sources.yaml](context-sources.yaml) の `roots` を書き換える
+3. 設計書リポジトリを隣に clone し、[context-sources.yaml](context-sources.yaml) の `roots` を書き換える（CI での D8 は [設計書を別リポジトリに置くとき](guidelines/quality-gates.md#設計書を別リポジトリに置くときd8)）
 4. `guidelines/` をチームの規約に合わせて直す（`traceability/authority.yaml` も合わせて直し、D11 を通す）
 5. `samples/` と `traceability/specs/` のサンプルを消し、1 本目の設計書でフェーズ 1 から始める
 6. [eval/](eval/README.md) の評価ループで、AI 生成と人の実装を比べてルールを育てる
@@ -70,8 +70,9 @@ ai-coding/
 │   ├── specs/                    # 要件 ↔ 実装 ↔ テストの対応表（1 機能 1 ファイル）
 │   └── authority.yaml            # ルール ↔ チェックの対応表
 ├── tools/spec-trace/             # 対応表の検証ツール
-├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs
+├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs、check_template_drift
 ├── samples/design-docs/          # 架空の設計書（Front Matter の id で参照）
+├── samples/ci/                   # 設計書を別リポジトリに置くときの CI の例
 ├── eval/                         # 評価ループ（ラン記録・指標）
 └── context-sources.yaml          # 設計書の置き場と参照ルール
 ```
@@ -93,6 +94,9 @@ ai-coding/
 - `context-sources.yaml` の `roots` のフォルダと `types` のテンプレートが実在すること
 - YAML・JSON がすべて読めること
 - Copilot のファイルの Front Matter が読め、必須キーがあること（`*.instructions.md` は `applyTo`、`*.prompt.md`・`*.agent.md` は `description`、`SKILL.md` は `name`（フォルダ名と同じ）と `description`）
+
+`template-drift` ジョブでは、`template/` が写し元（dev-environment の `sample-app`）から、
+[template/UPSTREAM.yaml](template/UPSTREAM.yaml) に理由を書いた差分以外ずれていないことを確かめます（`python scripts/check_template_drift.py`）。
 
 CI の Actions はコミット SHA で固定し（横にバージョンを書く）、権限は `contents: read` だけにしています。
 更新は Dependabot（[.github/dependabot.yml](.github/dependabot.yml)）が月 1 回 PR で提案します。
