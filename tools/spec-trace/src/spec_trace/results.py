@@ -14,6 +14,7 @@ from pathlib import Path
 from devtools_common.cli import UsageError
 
 PASSED, FAILED, SKIPPED = "passed", "failed", "skipped"
+_INVOCATION = re.compile(r"^\[\d+\]")  # パラメータ化テストの 1 回分（Gradle の JUnit XML の名前）
 
 
 @dataclass
@@ -30,14 +31,20 @@ class TestResults:
     cases: list[Case] = field(default_factory=list)
     files: int = 0
 
-    def find(self, owner: str | None, method: str) -> list[Case]:
-        """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）."""
+    def find(self, owner: str | None, method: str, generated: bool = False) -> list[Case]:
+        """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）.
+
+        generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）ときは、
+        同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす（同じクラスに複数あると区別できないので、全部をまとめて見る）。
+        """
         out = []
         for c in self.cases:
             if _method_name(c.name) != method:
                 continue
             if owner is None or _simple_class(c.classname) == owner:
                 out.append(c)
+        if not out and generated and owner is not None:
+            out = [c for c in self.cases if _simple_class(c.classname) == owner and _INVOCATION.match(c.name)]
         return out
 
 

@@ -19,7 +19,7 @@ from devtools_common.cli import run_main
 from devtools_common.report import report_schema
 
 from spec_trace import cli
-from spec_trace.code import lookup_scenario, lookup_symbol, split_symbol
+from spec_trace.code import is_generated_test, lookup_scenario, lookup_symbol, split_symbol
 from spec_trace.core import sha256_of
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -319,6 +319,49 @@ class TestResultsTest(Base):
         rc, data = self.check("--test-results", str(self.results(junit=junit)))
         self.assertEqual(rc, 1)
         self.assertIn("trace.proof_failed", self.rules(data))
+
+    def gradle9_parameterized(self, second: str) -> str:
+        # Gradle 9 の JUnit XML は、パラメータ化テストの 1 回分を「[1] 引数…」の名前にし、メソッド名を出さない（CI で確認した形）
+        return JUNIT_OK.replace(
+            '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>',
+            '<testcase name="[1] s = &quot;a, b&quot;" classname="com.example.batch.order.OrderImportJobTest"/>'
+            f'<testcase name="[2] s = &quot;c&quot;" classname="com.example.batch.order.OrderImportJobTest">{second}'
+            "</testcase>",
+        )
+
+    def test_gradle9_parameterized_names_are_matched_by_annotation(self):
+        self.use_parameterized_test()
+        self.edit(
+            "java/test/OrderImportJobTest.java",
+            "    @Test\n    void other(String s)",
+            '    @ParameterizedTest\n    @CsvSource({"a, b", "c"})\n    void other(String s)',
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=self.gradle9_parameterized(""))))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        failed = self.gradle9_parameterized('<failure message="boom"/>')
+        rc, data = self.check("--test-results", str(self.results(junit=failed)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_failed", self.rules(data))
+
+    def test_plain_test_is_not_matched_to_parameterized_results(self):
+        self.use_parameterized_test()  # @Test のまま（パラメータ化ではない）
+        rc, data = self.check("--test-results", str(self.results(junit=self.gradle9_parameterized(""))))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_is_generated_test_with_multiline_annotation(self):
+        # template の OrderImportServiceTest#parseRejects と同じ形（複数行の @CsvSource、delimiter = '|' を含む）
+        java = self.tmp / "XTest.java"
+        java.write_text(
+            "class XTest {\n"
+            "    @Test\n    void plain() { assertThat(parse(\"a\")).isNull(); }\n\n"
+            "    @ParameterizedTest\n    @CsvSource(delimiter = '|', value = {\n"
+            '        "a | b",\n        "c | d"\n    })\n'
+            "    void parseRejects(String line, String message) {\n        assertThat(plain()).isNull();\n    }\n}\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(is_generated_test(java, "XTest#parseRejects"))
+        self.assertFalse(is_generated_test(java, "XTest#plain"))
 
     def test_results_dir_without_xml_is_usage_error(self):
         empty = self.tmp / "empty"

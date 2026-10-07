@@ -23,7 +23,7 @@ from devtools_common.config import load_structured
 from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
-from .code import lookup_scenario, lookup_symbol, split_symbol
+from .code import is_generated_test, lookup_scenario, lookup_symbol, split_symbol
 from .results import FAILED, SKIPPED, TestResults, load_results
 
 log = get_logger(__name__)
@@ -297,18 +297,18 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                     suggestion="結果を確かめるアサーションを書く（実行するだけのテストは裏付けにならない）",
                 )
             )
-        else:
-            out += _check_result(symbol, it["file"], loc, st)
+        elif st.results() is not None:
+            out += _check_result(symbol, it["file"], loc, st, is_generated_test(path, symbol))
     return out
 
 
-def _check_result(symbol: str, file: str, loc: str, st: Settings) -> list[Finding]:
+def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: bool) -> list[Finding]:
     """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる."""
     results = st.results()
     if results is None:
         return []
     owner, method = split_symbol(symbol)
-    cases = results.find(owner, method)
+    cases = results.find(owner, method, generated)
     if not cases:
         seen = results.names_in_class(owner)
         hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"

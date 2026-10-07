@@ -45,6 +45,10 @@ jobs:
           set -o pipefail
           if [ "$FINAL" = "true" ]; then arg="--final"; else arg=""; fi
           ./scripts/verify-gates.sh $arg 2>&1 | tee gates.log
+      # 注釈は 1 ステップ 10 件までなので、どのゲートが落ちたか（表の FAIL 行）を先に別のステップで出す
+      - name: Failed gates
+        if: failure()
+        run: grep -E '^\| .* \| FAIL \|$' gates.log | sed 's/^/::error::/' || true
       - name: Show failures as annotations
         if: failure()
         run: |
@@ -92,6 +96,12 @@ jobs:
           $gateArgs = if ($env:FINAL -eq 'true') { @('-Final') } else { @() }
           & .\scripts\verify-gates.ps1 @gateArgs 2>&1 | Tee-Object -FilePath gates.log
           exit $LASTEXITCODE
+      - name: Failed gates
+        if: failure()
+        shell: powershell
+        run: |
+          Get-Content gates.log | Select-String -Pattern 'FAIL' | Select-Object -First 9 |
+            ForEach-Object { Write-Output "::error::$($_.Line.Trim())" }
       - name: Show failures as annotations
         if: failure()
         shell: powershell

@@ -35,6 +35,9 @@ spec-trace check traceability/specs --root . --require proven --test-results tem
 ```
 
 - 照合はクラス名（単純名）とメソッド名で行う。パラメータ化テスト（`parseRejects(String, String)[1]` など）は、全実行分が成功していれば成功
+- Gradle 9 の結果では、パラメータ化テスト（`@ParameterizedTest` など）の 1 回分の名前が `[1] 引数…` になり、メソッド名が出ない。
+  そのため、テストのソースにこれらのアノテーションがあるメソッドは、同じクラスの `[番号] …` の結果をまとめて見る
+  （同じクラスにパラメータ化テストが複数あると区別できず、どれか 1 つの失敗で全部が失敗扱いになる）
 - 結果のファイルが無い・XML として読めないときは、黙って通さず終了コード 2 にする
 - Karate などのシナリオ（`.feature`）は照合せず、`trace.proof_result_unchecked` の警告を出す
 

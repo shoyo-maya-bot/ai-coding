@@ -129,6 +129,48 @@ def _generic_lookup(text: str, symbol: str) -> Lookup:
     return Lookup(False)
 
 
+_GENERATED_TEST = re.compile(r"@(?:ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b")
+
+
+def is_generated_test(path: Path, symbol: str) -> bool:
+    """パラメータ化テストなど、1 つのメソッドが複数回実行されるテストか（JUnit 5 のアノテーションで判断）.
+
+    Gradle の JUnit XML では、こうしたテストの実行結果の名前が「[1] 引数…」になり、メソッド名が出ない。
+    結果と照合するときの手がかりに使う（Python の parametrize は結果の名前にメソッド名が残るので対象外）。
+    """
+    if path.suffix == ".py":
+        return False
+    code = _strip_comments_and_strings(path.read_text(encoding="utf-8", errors="replace"))
+    owner, name = split_symbol(symbol)
+    start = 0
+    if owner:
+        m = re.search(rf"\b{_CLASS_DECL}\s+{re.escape(owner)}\b", code)
+        if not m:
+            return False
+        start = m.end()
+    for m in re.finditer(rf"\b{re.escape(name)}[ \t]*\(", code[start:]):
+        pos = start + m.start()
+        before = code[:pos].rstrip()
+        if not before or not (before[-1].isalnum() or before[-1] in "_>]"):
+            continue  # 宣言ではなく呼び出し（直前が型名でない: obj.name( / = name( など）
+        if re.search(r"\b(?:return|new|throw)$", before):
+            continue
+        # メソッド名から前へ戻り、直前のメンバーの終わり（かっこの外の ; { }）までを宣言の頭（アノテーション）とみなす
+        depth = 0
+        i = pos - 1
+        while i >= 0:
+            c = code[i]
+            if c == ")":
+                depth += 1
+            elif c == "(":
+                depth -= 1
+            elif c in ";{}" and depth == 0:
+                break
+            i -= 1
+        return bool(_GENERATED_TEST.search(code[i + 1 : pos]))
+    return False
+
+
 def lookup_symbol(path: Path, symbol: str) -> Lookup:
     text = path.read_text(encoding="utf-8", errors="replace")
     if path.suffix == ".py":
