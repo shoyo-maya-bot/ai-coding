@@ -4,10 +4,22 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: monthly}
+  # template/ は dev-environment の sample-app の写し. 写し元と揃える依存（template/UPSTREAM.yaml の keep_in_sync）は
+  # 写し元の Dependabot で上げ、マージ後に check_template_drift.py --ref main で取り込む（template 側で上げると drift で必ず落ちる）.
+  # ここで上げるのは template にだけある依存（SpotBugs など）.
   - package-ecosystem: gradle
     directory: /template
     schedule: {interval: monthly}
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "org.springframework.boot*"
+      - dependency-name: "io.spring.dependency-management*"
+      - dependency-name: "org.mybatis.spring.boot:*"
+      - dependency-name: "software.amazon.awssdk:*"
+      - dependency-name: "io.karatelabs:*"
+      - dependency-name: "org.postgresql:*"
+      - dependency-name: "org.junit.platform:*"
+      - dependency-name: "gradle-wrapper"
   - package-ecosystem: pip
     directory: /tools/spec-trace
     schedule: {interval: monthly}

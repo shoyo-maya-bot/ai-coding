@@ -1,5 +1,7 @@
 name: ci
 
+# ゲートの中身は scripts/verify-gates.sh（Windows は .ps1）の 1 か所に書き、CI はそれを呼ぶだけにする
+# （手元の verify-gates と CI がずれないように。tests/test_verify_gates.py が sh と ps1 の一致を確かめる）.
 on:
   pull_request:
   push:
@@ -13,14 +15,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # PR は途中段階（実装済み・テスト未了）も通す: implemented 以上。main への push は全要件 proven（--final）を必須にする
+  FINAL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'true' || 'false' }}
+
 jobs:
-  java-gates:
-    name: D1-D5,D9 (Java)
+  gates:
+    name: verify-gates (D1-D11, tests, lint, template drift)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: template
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,23 +33,74 @@ jobs:
           distribution: corretto
           java-version: "17"
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - name: qualityGate
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install (constraints.txt で版を固定)
+        run: |
+          if [ -f constraints.txt ]; then c="-c constraints.txt"; else echo "::warning::constraints.txt がありません"; c=""; fi
+          pip install -e "tools/spec-trace[dev]" pyyaml $c
+      - name: verify-gates
         run: |
           set -o pipefail
-          ./gradlew --no-daemon --continue qualityGate 2>&1 | tee build.log
+          if [ "$FINAL" = "true" ]; then arg="--final"; else arg=""; fi
+          ./scripts/verify-gates.sh $arg 2>&1 | tee gates.log
       - name: Show failures as annotations
         if: failure()
         run: |
-          grep -E -A6 "What went wrong|\[ant:checkstyle\]|error:|FAILED|Rule violated|SpotBugs|Mapper XML" build.log \
-            | head -60 | sed 's/^/::error::/' || true
+          grep -E -A6 "What went wrong|\[ant:checkstyle\]|error:|FAILED|Rule violated|SpotBugs|Mapper XML|trace\.|NG |FAIL" gates.log \
+            | head -80 | sed 's/^/::error::/' || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: gate-reports
-          path: template/build/reports/
+          path: |
+            template/build/reports/
+            template/build/test-results/
+            gates.log
+          if-no-files-found: ignore
 
-  trace-gates:
-    name: D6-D8,D10,D11 (traceability)
+  # 手引きの利用者は Windows. Windows PowerShell 5.1 で verify-gates.ps1 が最後まで動くことを確かめる
+  windows:
+    name: verify-gates.ps1 (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: corretto
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install (constraints.txt で版を固定)
+        shell: powershell
+        run: |
+          if (Test-Path constraints.txt) { python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt }
+          else { python -m pip install -e "tools/spec-trace[dev]" pyyaml }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: verify-gates.ps1 (Windows PowerShell 5.1)
+        shell: powershell
+        env:
+          PYTHON: python
+        run: |
+          if ($env:FINAL -eq 'true') { .\scripts\verify-gates.ps1 -Final } else { .\scripts\verify-gates.ps1 }
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: gate-reports-windows
+          path: |
+            template/build/reports/
+            template/build/test-results/
+          if-no-files-found: ignore
+
+  security:
+    name: security (bandit, pip-audit)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,48 +110,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install -e "tools/spec-trace[dev]"
-      - name: tools tests
+      - name: install
         run: |
-          (cd tools/spec-trace && python -m pytest -q)
-          python -m pytest -q tests
-      - name: lint
-        run: ruff check tools scripts tests && ruff format --check tools scripts tests
-      # PR は途中段階（実装済み・テスト未了）も通す: implemented 以上。main への push は全要件 proven を必須にする
-      - name: spec-trace (PR は implemented 以上、main は全要件 proven。ドリフト無し)
-        env:
-          REQUIRE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'proven' || 'implemented' }}
-        run: spec-trace check traceability/specs --root . --require "$REQUIRE" --enforce-drift -f markdown
-      - name: authority graph
-        run: python scripts/verify_authority.py
-
-  docs:
-    name: docs (links, YAML/JSON, Copilot files)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - run: pip install pyyaml
-      - name: check_docs
-        run: python scripts/check_docs.py
-
-  template-drift:
-    name: template drift (dev-environment sample-app)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - run: pip install pyyaml
-      # template/UPSTREAM.yaml の sha（写し元の commit）を取得して比べる。説明の無い差分があれば失敗
-      - name: check_template_drift
-        run: python scripts/check_template_drift.py
+          if [ -f constraints.txt ]; then c="-c constraints.txt"; else c=""; fi
+          pip install -e tools/spec-trace pyyaml $c
+          pip install "bandit==1.8.6" "pip-audit==2.9.0"
+      - name: SAST（bandit. 中以上）
+        run: bandit -q -r tools/spec-trace/src scripts -ll
+      # devtools-common は git の URL で入れる（PyPI に無い）ので、pip-audit の対象から外れる（--skip-editable と同じ扱い）
+      - name: 依存の脆弱性（pip-audit）
+        run: pip-audit --skip-editable --progress-spinner off
