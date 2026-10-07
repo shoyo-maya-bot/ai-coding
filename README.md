@@ -35,8 +35,9 @@
 前提: [dev-environment](https://github.com/shoyo-maya-bot/dev-environment) のローカル環境（Java 17・Rancher Desktop）と Python 3.12。
 
 ```bash
-git clone https://github.com/shoyo-maya-bot/ai-coding.git && cd ai-coding
-pip install -e tools/spec-trace            # 対応表の検証ツール
+git clone https://github.com/shoyo-maya-bot/ai-coding.git
+cd ai-coding
+pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt   # 検証ツールと、テスト・lint の道具（版は constraints.txt で固定）
 ./scripts/verify-gates.sh --final          # Windows: .\scripts\verify-gates.ps1 -Final
 ```
 
@@ -88,15 +89,32 @@ ai-coding/
 | D5 | SpotBugs | D11 | ルールとチェックの対応（越権・空文化の検出） |
 | D6 | 実装の実在 | N1〜N6 | AI レビュー（設計書との突合。補助） |
 
-このほか CI の `docs` ジョブで、ドキュメントと設定ファイルを検査します（`python scripts/check_docs.py`、ネットワーク不要）。
+CI は `scripts/verify-gates.sh`（Linux）と `scripts\verify-gates.ps1`（Windows PowerShell 5.1）を呼ぶだけで、手元の verify-gates と同じ内容・同じ順に実行します
+（中身は [guidelines/quality-gates.md](guidelines/quality-gates.md)）。PR は全要件 `implemented` 以上、main への push は `--final`（全要件 `proven`）です。
+`proven` の要件は、テストが実在してアサーションがあるだけでなく、JUnit の結果 XML（`template/build/test-results/test`）で **実行されて成功した** ことも確かめます。
+D10 の Karate シナリオは CI では実行しません（起動中のアプリが要るため。存在・有効性・確認の有無だけを見ます）。
+ほかに `security` ジョブで bandit と pip-audit を流します。
+
+verify-gates の `docs` ゲートでは、ドキュメントと設定ファイルを検査します（`python scripts/check_docs.py`、ネットワーク不要）。
 
 - Markdown の相対リンクとアンカー（`#見出し`）がリポジトリ内で解決できること
 - `context-sources.yaml` の `roots` のフォルダと `types` のテンプレートが実在すること
 - YAML・JSON がすべて読めること
 - Copilot のファイルの Front Matter が読め、必須キーがあること（`*.instructions.md` は `applyTo`、`*.prompt.md`・`*.agent.md` は `description`、`SKILL.md` は `name`（フォルダ名と同じ）と `description`）
+- Copilot のファイル（エージェント・プロンプト・指示）のコマンドに `&&` が無いこと（Windows PowerShell 5.1 で動かないため）
 
-`template-drift` ジョブでは、`template/` が写し元（dev-environment の `sample-app`）から、
+`template drift` ゲートでは、`template/` が写し元（dev-environment の `sample-app`）から、
 [template/UPSTREAM.yaml](template/UPSTREAM.yaml) に理由を書いた差分以外ずれていないことを確かめます（`python scripts/check_template_drift.py`）。
+依存ライブラリと Gradle の版は写し元で上げ、マージ後に `--ref main` で差分を見て取り込みます（手順は UPSTREAM.yaml の先頭）。
+そのため Dependabot は、template の写し元と揃える依存を上げません（template にだけある SpotBugs などは上げます）。
+
+## 変更点
+
+| 時期 | 変更 | 影響 |
+|---|---|---|
+| 2026-10 | verify-gates の既定が `--require implemented` になり、pytest・ruff・template drift も実行する。CI は verify-gates を呼ぶ | 手元で verify-gates を流すと、以前より時間がかかり、テスト・lint・ずれでも失敗する（CI と同じ結果になる） |
+| 2026-10 | spec-trace に `--test-results` を追加（CI と verify-gates で使用） | proven のテストが失敗・未実行・スキップなら D7 が落ちる |
+| 2026-10 | エージェントは `spec-trace pin`・`git push`・PR 作成を、人の承認後でも実行しない | 以前の「人の承認後にだけ行う」から変更（guidelines/workflow.md の「人だけが行うこと」） |
 
 CI の Actions はコミット SHA で固定し（横にバージョンを書く）、権限は `contents: read` だけにしています。
 更新は Dependabot（[.github/dependabot.yml](.github/dependabot.yml)）が月 1 回 PR で提案します。

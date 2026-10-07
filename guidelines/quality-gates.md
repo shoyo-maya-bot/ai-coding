@@ -2,7 +2,20 @@
 
 ## 決定論ゲート（機械判定。CI とローカルで同じものを同じ順に回す）
 
-`scripts/verify-gates.sh`（Windows は `scripts\verify-gates.ps1`）で全部、`./gradlew qualityGate` で Java の分だけ実行できます。
+`scripts/verify-gates.sh`（Windows は `scripts\verify-gates.ps1`）で全部、`./template/gradlew -p template qualityGate` で Java の分だけ実行できます。
+CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手元と CI で実行する中身と順番は同じです（Linux と Windows の両方で回します）。
+
+| 順 | ゲート | 実行するもの |
+|---|---|---|
+| 1 | D1〜D5・D9 | `template/gradlew -p template --continue qualityGate` |
+| 2 | ツールのテスト | `pytest tools/spec-trace/tests tests` |
+| 3 | lint | `ruff check` と `ruff format --check`（tools・scripts・tests） |
+| 4 | D6〜D8・D10 | `spec-trace check traceability/specs --enforce-drift --require <状態> --test-results template/build/test-results/test` |
+| 5 | D11 | `scripts/verify_authority.py` |
+| 6 | docs | `scripts/check_docs.py` |
+| 7 | template のずれ | `scripts/check_template_drift.py`（写し元を取得するのでネットワークが要る） |
+
+`<状態>` は、既定（PR と同じ）が `implemented`、`--final`（Windows は `-Final`。main と同じ）が `proven` です。
 
 | ID | ゲート | 合格基準 | 実体 |
 |---|---|---|---|
@@ -12,11 +25,14 @@
 | D4 | 分岐網羅 | Service・Job の分岐網羅率が閾値以上（既定 80%。目標 100% に向けて引き上げる） | `jacocoTestCoverageVerification`（`-PbranchCoverageMinimum=1.0`） |
 | D5 | バグパターン | SpotBugs の指摘 0（除外は理由付きでレビュー） | `spotbugsMain` |
 | D6 | 実装の実在 | implemented 以上の要件の実装箇所が実在 | `spec-trace check`（`trace.implements_*`） |
-| D7 | テストの実在と検証 | proven の要件のテストが実在し、アサーション 1 件以上 | `spec-trace check`（`trace.proof_*`） |
+| D7 | テストの実在と検証 | proven の要件のテストが実在し、アサーション 1 件以上。さらに、そのテストが実行されて成功している（JUnit の結果 XML と照合） | `spec-trace check --test-results`（`trace.proof_*`） |
 | D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致 | `spec-trace check --enforce-drift`（`trace.spec_drift`） |
 | D9 | SQL の安全性 | Mapper XML に `${}` が無い | `verifyMapperSql` |
-| D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある | `spec-trace check`（シナリオ） |
+| D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
 | D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある | `scripts/verify_authority.py` |
+
+D10 の Karate シナリオは、起動中のアプリと DB が要るので、この CI では実行しません（`spec-trace` は `trace.proof_result_unchecked` の警告で知らせます）。
+実際に API を呼んで通ることは、dev-environment の CI（e2e ジョブ）と、RP3 のレビューで手元の `karateTest` の結果を見て確かめます。
 
 CI でマージ前に必須とするのは D1〜D11 全部です。要件の状態は、PR では `--require implemented`（途中段階でも全要件が実装済み）、
 main への push では `--require proven`（全要件がテスト済み）を求めます。完了時（PR 前）は手元でも `--final`（`--require proven`）で確かめます。
