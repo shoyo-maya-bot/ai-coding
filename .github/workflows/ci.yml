@@ -107,7 +107,7 @@ jobs:
         shell: powershell
         run: |
           Get-Content gates.log |
-            Select-String -Pattern 'What went wrong|\[ant:checkstyle\]|error:|FAILED|Rule violated|SpotBugs|Mapper XML|trace\.|NG |FAIL|would reformat|Error' |
+            Select-String -Pattern 'What went wrong|\[ant:checkstyle\]|error:|FAILED|Rule violated|SpotBugs|Mapper XML|trace\.|NG|would reformat|Error|写し元|template' |
             Select-Object -First 80 |
             ForEach-Object { Write-Output "::error::$($_.Line)" }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

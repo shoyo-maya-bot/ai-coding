@@ -161,7 +161,8 @@ class DriftTest(Base):
     def test_pin_inserts_hash_after_source(self):
         self.edit(SPEC, 'source_sha256: "', 'x_removed: "')
         p = self.proj / SPEC
-        p.write_text("\n".join(ln for ln in p.read_text(encoding="utf-8").splitlines() if "x_removed" not in ln) + "\n")
+        kept = [ln for ln in p.read_text(encoding="utf-8").splitlines() if "x_removed" not in ln]
+        p.write_text("\n".join(kept) + "\n", encoding="utf-8")
         _, data = self.check()
         self.assertEqual(self.rules(data), ["trace.source_unpinned"])
         run_cli("pin", str(p), "--root", str(self.proj))
@@ -321,7 +322,8 @@ class TestResultsTest(Base):
         self.assertIn("trace.proof_failed", self.rules(data))
 
     def gradle9_parameterized(self, second: str) -> str:
-        # Gradle 9 の JUnit XML は、パラメータ化テストの 1 回分を「[1] 引数…」の名前にし、メソッド名を出さない（CI で確認した形）
+        # Gradle 9 の JUnit XML は、パラメータ化テストの 1 回分を「[1] 引数…」の名前にし、
+        # メソッド名を出さない（CI で確認した形）
         return JUNIT_OK.replace(
             '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>',
             '<testcase name="[1] s = &quot;a, b&quot;" classname="com.example.batch.order.OrderImportJobTest"/>'
@@ -354,7 +356,7 @@ class TestResultsTest(Base):
         java = self.tmp / "XTest.java"
         java.write_text(
             "class XTest {\n"
-            "    @Test\n    void plain() { assertThat(parse(\"a\")).isNull(); }\n\n"
+            '    @Test\n    void plain() { assertThat(parse("a")).isNull(); }\n\n'
             "    @ParameterizedTest\n    @CsvSource(delimiter = '|', value = {\n"
             '        "a | b",\n        "c | d"\n    })\n'
             "    void parseRejects(String line, String message) {\n        assertThat(plain()).isNull();\n    }\n}\n",

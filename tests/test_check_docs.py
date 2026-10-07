@@ -57,7 +57,8 @@ class CheckDocsTest(unittest.TestCase):
         # 採点で見つかった書き方: Windows PowerShell 5.1 は && を解釈できず、エージェントの自動修正ループが最初で止まる
         self.write(
             ".github/agents/coder.agent.md",
-            "---\ndescription: x\n---\n\n1. `cd template && ./gradlew test` を実行する\n2. `&&` は使えない（説明は可）\n",
+            "---\ndescription: x\n---\n\n1. `cd template && ./gradlew test` を実行する\n"
+            "2. `&&` は使えない（説明は可）\n",
         )
         errs = self.errors()
         self.assertEqual(len(errs), 1, errs)

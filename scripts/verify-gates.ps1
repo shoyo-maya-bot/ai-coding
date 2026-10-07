@@ -7,6 +7,8 @@
 param([switch]$Final)
 # 外部コマンド（gradle・pip など）が標準エラーに書いただけでは止めない（結果は終了コードで判定する）
 $ErrorActionPreference = 'Continue'
+# Python の出力を UTF-8 にする（パイプやファイルに出すとき、Windows の既定の文字コードでは日本語を書けず落ちるため）
+$env:PYTHONUTF8 = '1'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $py = if ($env:PYTHON) { $env:PYTHON } elseif (Get-Command py -ErrorAction SilentlyContinue) { 'py' } else { 'python' }
 $require = if ($Final) { 'proven' } else { 'implemented' }

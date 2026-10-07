@@ -34,8 +34,9 @@ class TestResults:
     def find(self, owner: str | None, method: str, generated: bool = False) -> list[Case]:
         """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）.
 
-        generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）ときは、
-        同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす（同じクラスに複数あると区別できないので、全部をまとめて見る）。
+        generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）
+        ときは、同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす
+        （同じクラスに複数あると区別できないので、全部をまとめて見る）。
         """
         out = []
         for c in self.cases:
@@ -46,7 +47,6 @@ class TestResults:
         if not out and generated and owner is not None:
             out = [c for c in self.cases if _simple_class(c.classname) == owner and _INVOCATION.match(c.name)]
         return out
-
 
     def names_in_class(self, owner: str | None, limit: int = 5) -> list[str]:
         """クラス（単純名）の結果にあるテスト名（見つからないときの手がかり）."""
