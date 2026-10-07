@@ -310,11 +310,13 @@ def _check_result(symbol: str, file: str, loc: str, st: Settings) -> list[Findin
     owner, method = split_symbol(symbol)
     cases = results.find(owner, method)
     if not cases:
+        seen = results.names_in_class(owner)
+        hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"
         return [
             Finding(
                 "trace.proof_not_run",
                 Severity.ERROR,
-                f"テスト {symbol} の実行結果がありません（実行されていない）",
+                f"テスト {symbol} の実行結果がありません（実行されていない）{hint}",
                 location=loc,
                 field="proofs.symbol",
                 actual=f"{file} {symbol}",

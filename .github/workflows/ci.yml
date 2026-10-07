@@ -88,8 +88,18 @@ jobs:
         env:
           PYTHON: python
         run: |
-          if ($env:FINAL -eq 'true') { .\scripts\verify-gates.ps1 -Final } else { .\scripts\verify-gates.ps1 }
+          $ErrorActionPreference = 'Continue'
+          $gateArgs = if ($env:FINAL -eq 'true') { @('-Final') } else { @() }
+          & .\scripts\verify-gates.ps1 @gateArgs 2>&1 | Tee-Object -FilePath gates.log
           exit $LASTEXITCODE
+      - name: Show failures as annotations
+        if: failure()
+        shell: powershell
+        run: |
+          Get-Content gates.log |
+            Select-String -Pattern 'What went wrong|\[ant:checkstyle\]|error:|FAILED|Rule violated|SpotBugs|Mapper XML|trace\.|NG |FAIL|would reformat|Error' |
+            Select-Object -First 80 |
+            ForEach-Object { Write-Output "::error::$($_.Line)" }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -97,6 +107,7 @@ jobs:
           path: |
             template/build/reports/
             template/build/test-results/
+            gates.log
           if-no-files-found: ignore
 
   security:

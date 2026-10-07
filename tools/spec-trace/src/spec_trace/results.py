@@ -41,6 +41,14 @@ class TestResults:
         return out
 
 
+    def names_in_class(self, owner: str | None, limit: int = 5) -> list[str]:
+        """クラス（単純名）の結果にあるテスト名（見つからないときの手がかり）."""
+        if owner is None:
+            return []
+        names = [c.name for c in self.cases if _simple_class(c.classname) == owner]
+        return names[:limit]
+
+
 def _method_name(name: str) -> str:
     """'importsValid()' / 'parseRejects(String, String)[1]' / 'test_x[a-b]' → メソッド名."""
     return re.split(r"[(\[]", name, maxsplit=1)[0].strip()
