@@ -3,6 +3,7 @@
 例:
   spec-trace check traceability/                           # 定義を検査（レポートは Markdown）
   spec-trace check traceability/ --require proven -f json  # CI: 全要件がテスト済みであることを必須に
+  spec-trace check traceability/ --test-results build/test-results/test   # テストが実行されて成功したことも確かめる
   spec-trace pin traceability/order-import.yaml            # 承認時点の設計書ハッシュを記録
   spec-trace schema                                        # 定義ファイルの JSON Schema を表示
 
@@ -45,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="設計書が見つからない場合もエラーにする（既定は警告）",
     )
+    c.add_argument(
+        "--test-results",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="JUnit 形式のテスト結果（ファイルかディレクトリ。複数可）。指定すると proven のテストが"
+        "「実行されて成功した」ことも確かめる（例: template/build/test-results/test）",
+    )
     common_cli.add_common_args(c)
 
     pn = sub.add_parser("pin", help="設計書の現在のハッシュを定義に記録する（承認後に人が実行）")
@@ -75,7 +85,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.min_asserts < 0:
         raise common_cli.UsageError("--min-asserts は 0 以上")
-    st = Settings(root=args.root, min_asserts=args.min_asserts, require=args.require, enforce_drift=args.enforce_drift)
+    st = Settings(
+        root=args.root,
+        min_asserts=args.min_asserts,
+        require=args.require,
+        enforce_drift=args.enforce_drift,
+        test_results=args.test_results,
+    )
     findings, summary = run(args.paths, st)
     text = report.render(
         findings,

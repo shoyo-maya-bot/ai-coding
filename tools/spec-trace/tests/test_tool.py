@@ -233,3 +233,107 @@ class CodeLookupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+JUNIT_OK = """<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.batch.order.OrderImportJobTest" tests="2" failures="0" errors="0" skipped="0">
+  <testcase name="importOrders_skipsExisting()" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>
+  <testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>
+</testsuite>
+"""
+PYTEST_OK = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" tests="2">
+  <testcase classname="tests.test_order_import.TestOrderValidator" name="test_required" time="0.001"/>
+  <testcase classname="tests.test_order_import" name="test_import_is_idempotent" time="0.001"/>
+</testsuite></testsuites>
+"""
+
+
+class TestResultsTest(Base):
+    """--test-results: proven の裏付けに「テストが実行されて成功した」ことも求める."""
+
+    def results(self, junit: str = JUNIT_OK, pytest: str = PYTEST_OK) -> Path:
+        d = self.tmp / "results"
+        (d / "test").mkdir(parents=True, exist_ok=True)
+        (d / "test" / "TEST-com.example.batch.order.OrderImportJobTest.xml").write_text(junit, encoding="utf-8")
+        (d / "pytest.xml").write_text(pytest, encoding="utf-8")
+        return d
+
+    def test_all_passed(self):
+        rc, data = self.check("--require", "proven", "--test-results", str(self.results()))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        warn = [f for f in data["findings"] if f["rule_id"] == "trace.proof_result_unchecked"][0]
+        self.assertEqual(warn["severity"], "warning")
+        self.assertIn("REQ-ORDER-003", warn["location"])
+
+    def test_assertion_exists_but_test_failed(self):
+        # 採点で見つかった穴: アサーションがあれば proven になり、テストが落ちていても気づけない
+        failed = JUNIT_OK.replace(
+            'time="0.01"/>',
+            'time="0.01"><failure message="expected 0 but was 1">AssertionError</failure></testcase>',
+            1,
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=failed)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_failed", self.rules(data))
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_failed"][0]
+        self.assertIn("REQ-ORDER-002", f["location"])
+        self.assertIn("expected 0 but was 1", f["actual"])
+
+    def test_not_run(self):
+        rc, data = self.check("--test-results", str(self.results(pytest=PYTEST_OK.replace("test_required", "x"))))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_skipped(self):
+        skipped = PYTEST_OK.replace(
+            'name="test_import_is_idempotent" time="0.001"/>',
+            'name="test_import_is_idempotent" time="0.001"><skipped message="later"/></testcase>',
+        )
+        rc, data = self.check("--test-results", str(self.results(pytest=skipped)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_skipped", self.rules(data))
+
+    def use_parameterized_test(self) -> None:
+        self.edit(SPEC, "OrderImportJobTest#importOrders_skipsExisting", "OrderImportJobTest#other")
+        self.edit("java/test/OrderImportJobTest.java", "void importOrders_skipsExisting()", "void other(String s)")
+
+    def check_raw(self, results: Path) -> tuple[int, str]:
+        args = ["check", str(self.proj / "traceability"), "--root", str(self.proj), "--test-results", str(results)]
+        rc, _, err = run_cli(*args)
+        return rc, err
+
+    def test_parameterized_invocations_all_passed(self):
+        self.use_parameterized_test()
+        rc, data = self.check("--test-results", str(self.results()))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+
+    def test_one_failed_invocation_fails(self):
+        junit = JUNIT_OK.replace(
+            '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>',
+            '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest"/>'
+            '<testcase name="other(String)[2]" classname="com.example.batch.order.OrderImportJobTest">'
+            '<error message="boom"/></testcase>',
+        )
+        self.use_parameterized_test()
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_failed", self.rules(data))
+
+    def test_results_dir_without_xml_is_usage_error(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        rc, err = self.check_raw(empty)
+        self.assertEqual(rc, 2)
+        self.assertIn("XML", err)
+
+    def test_broken_xml_is_usage_error(self):
+        d = self.results()
+        (d / "broken.xml").write_text("<testsuite><testcase", encoding="utf-8")
+        rc, err = self.check_raw(d)
+        self.assertEqual(rc, 2)
+        self.assertIn("broken.xml", err)
+
+    def test_without_option_behaves_as_before(self):
+        rc, data = self.check("--require", "proven")
+        self.assertEqual((rc, self.rules(data)), (0, []))

@@ -20,6 +20,23 @@ spec-trace schema                                # 定義ファイルの JSON Sc
 | `trace.spec_drift` | 設計書が承認時から変わっている |
 | `trace.source_unpinned` / `trace.source_missing` | 設計書のハッシュが未記録 / 設計書が見つからない |
 | `trace.duplicate_id` / `trace.not_done` | 要件 ID の重複 / `--require` の状態に達していない |
+| `trace.proof_failed` / `trace.proof_not_run` / `trace.proof_skipped` | （`--test-results` のとき）テストが失敗した / 結果に無い（実行されていない）/ スキップされた |
+| `trace.proof_result_unchecked` | （`--test-results` のとき・警告）シナリオ（.feature）の実行結果は照合していない |
+
+## テストが「実行されて成功した」ことも確かめる（--test-results）
+
+既定の検査は「テストが実在し、アサーションがある」までで、テストが通ったかは見ません。
+`--test-results` に JUnit 形式の結果（Gradle の `build/test-results/test`、`pytest --junitxml` など。ファイルかディレクトリ、複数可）を渡すと、
+proven の要件のテストごとに、結果の中に **実行されて成功した記録があること** も求めます。CI と verify-gates はこれを使います。
+
+```bash
+./template/gradlew -p template test
+spec-trace check traceability/specs --root . --require proven --test-results template/build/test-results/test
+```
+
+- 照合はクラス名（単純名）とメソッド名で行う。パラメータ化テスト（`parseRejects(String, String)[1]` など）は、全実行分が成功していれば成功
+- 結果のファイルが無い・XML として読めないときは、黙って通さず終了コード 2 にする
+- Karate などのシナリオ（`.feature`）は照合せず、`trace.proof_result_unchecked` の警告を出す
 
 Python は構文木、Java / Kotlin / TypeScript 等は宣言行と括弧の対応による近似、Gherkin（英語・日本語）に対応します。
 保証するのは「存在」と「最低限の検証」までで、テストの意味的な妥当性は人がレビューします。
