@@ -21,7 +21,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
  * 上限を超えたら読まずに {@link IOException} にする（JOB0001 は終了コード 8）。
  */
 @Component
-public class DefaultFileFetcher implements FileFetcher {
+public final class DefaultFileFetcher implements FileFetcher {
 
     /** 入力ファイルの大きさの上限の既定（64 MiB）. */
     public static final long DEFAULT_MAX_BYTES = 64L * 1024 * 1024;

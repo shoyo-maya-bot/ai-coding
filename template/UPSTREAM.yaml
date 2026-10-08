@@ -91,7 +91,9 @@ allowed_differences:
   - path: src/main/java/com/example/app/order/batch/DefaultFileFetcher.java
     kind: modified
     reason: >-
-      S3Config と同じ（D2 の行長制限）。コンストラクタの引数を折り返し、読んだバイト列を文字列にする式を変数に分けている（処理は同じ）
+      S3Config と同じ（D2 の行長制限）。コンストラクタの引数を折り返し、読んだバイト列を文字列にする式を変数に分けている（処理は同じ）。
+      また D5（SpotBugs）の CT_CONSTRUCTOR_THROW（上限の検査でコンストラクタが例外を投げる）に対し、除外ではなく
+      SpotBugs の推奨どおりクラスを final にしている（継承されない Bean。写し元には SpotBugs が無い）
   - path: src/test/java/com/example/app/order/batch/S3ConfigTest.java
     kind: modified
     reason: S3Config と同じ（D2 の行長制限）。URL を作る式を変数に分けて折り返している（検証の内容は同じ）
