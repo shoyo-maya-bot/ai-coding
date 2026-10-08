@@ -9,7 +9,7 @@ description = "仕様（要件）と実装・テストの対応表を検証し�
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "devtools-common @ git+https://github.com/shoyo-maya-bot/devtools-common.git@28bab4c4bfcf2eba9278a6c7a7ef2d660d983233",  # コミット SHA で固定
+  "devtools-common @ git+https://github.com/shoyo-maya-bot/devtools-common.git@2e25f8a11717ab387c7c2174d2a06b1a5eb37713",  # コミット SHA で固定
   "jsonschema>=4.26.0",
 ]
 
