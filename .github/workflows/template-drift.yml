@@ -1,0 +1,120 @@
+# template/ と写し元（dev-environment）のずれを週 1 回検査する.
+#
+# - UPSTREAM.yaml の sha（固定した写し元）との比較: CI の verify-gates でも毎回行う。ここでは写し元の main が
+#   進んで、取り込むべき変更（依存・Gradle の版、ポートの公開範囲など）が溜まっていないかを見る（--ref main）
+# - ずれがあれば Issue を 1 件作る（同じタイトルの Issue が開いていれば、作らずにコメントを足す）
+# - 直ったら（ずれが無くなったら）開いている Issue にコメントして閉じる
+# - 取り込みの手順は template/UPSTREAM.yaml の先頭
+name: template-drift
+
+on:
+  schedule:
+    - cron: "17 0 * * 1" # 毎週月曜 09:17（JST）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      failed: ${{ steps.check.outputs.failed }}
+      log: ${{ steps.check.outputs.log }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install
+        run: |
+          if [ -f constraints.txt ]; then c="-c constraints.txt"; else c=""; fi
+          python -m pip install pyyaml $c
+      - name: check_template_drift.py（固定した sha と、写し元の main）
+        id: check
+        run: |
+          set +e
+          {
+            echo "## 固定した sha（template/UPSTREAM.yaml）"
+            python scripts/check_template_drift.py
+            pinned=$?
+            echo
+            echo "## 写し元の main"
+            python scripts/check_template_drift.py --ref main
+            latest=$?
+          } > drift.log 2>&1
+          cat drift.log
+          # Issue の本文に使う（出力の上限に収まるよう先頭 50,000 バイト）
+          {
+            echo "log<<DRIFT_LOG_END"
+            head -c 50000 drift.log
+            echo
+            echo "DRIFT_LOG_END"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$pinned" -ne 0 ] || [ "$latest" -ne 0 ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drift-log
+          path: drift.log
+      - name: 失敗にする（ずれがある）
+        if: steps.check.outputs.failed == 'true'
+        run: |
+          echo "::error::template と写し元にずれがあります（drift.log と、作った Issue を見てください）"
+          exit 1
+
+  # Issue の作成・更新だけをするジョブ（書き込みの権限はここだけ。リポジトリのコードは動かさない）
+  report:
+    needs: drift
+    if: always() && needs.drift.result != 'cancelled' && needs.drift.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Issue を作る・更新する・閉じる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ needs.drift.outputs.failed }}
+          DRIFT_RESULT: ${{ needs.drift.result }}
+          DRIFT_LOG: ${{ needs.drift.outputs.log }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="template-drift: template と写し元（dev-environment）のずれ"
+          # 同じタイトルの開いている Issue（重複して作らない）
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ "$FAILED" = "true" ] || [ "$DRIFT_RESULT" = "failure" ]; then
+            {
+              echo "週 1 回の検査（[実行結果]($RUN_URL)）で、template と写し元のずれが見つかりました。"
+              echo
+              echo "取り込みの手順は template/UPSTREAM.yaml の先頭（--ref main で差分を見て template に写し、sha を更新する）。"
+              echo
+              echo '```text'
+              if [ -n "$DRIFT_LOG" ]; then printf '%s\n' "$DRIFT_LOG"; else echo "（ログがありません。実行結果を見てください）"; fi
+              echo '```'
+            } > body.md
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body-file body.md
+              echo "既存の Issue #$number にコメントしました"
+            else
+              gh issue create --title "$title" --body-file body.md
+            fi
+          elif [ -n "$number" ]; then
+            gh issue comment "$number" --body "週 1 回の検査（[実行結果]($RUN_URL)）でずれが無くなったので閉じます。"
+            gh issue close "$number"
+          else
+            echo "ずれなし"
+          fi

@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# push の前に、ドキュメントの検査（禁止事項の複写の一致・リンク・Front Matter など）を実行する.
+# 入れ方（clone ごとに 1 回）: git config core.hooksPath .githooks
+# CI の docs ゲート（scripts/verify-gates.sh / .ps1）と同じ scripts/check_docs.py を呼ぶ. ネットワークは使わない.
+# Windows でも Git for Windows の sh で動く. Python は PYTHON → python3 → python の順で探す.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ -n "${PYTHON:-}" ]; then
+  py="$PYTHON"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  py=python3
+else
+  py=python
+fi
+if ! "$py" scripts/check_docs.py; then
+  echo "pre-push: scripts/check_docs.py が失敗したので push を止めました。直してから push してください。" >&2
+  echo "  （禁止事項を変えたときは guidelines/workflow.md の要約の 1 行を、.github/ の 6 ファイルにそのまま複写する）" >&2
+  exit 1
+fi

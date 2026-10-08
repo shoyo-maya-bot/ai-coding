@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install -e "tools/spec-trace[dev]"
+      - run: python -m pip install -e "tools/spec-trace[dev]"
       # 設計書が承認時（source_sha256）から変わっていれば trace.spec_drift で失敗する（D8）
       - name: spec-trace (PR は implemented 以上、main は全要件 proven。ドリフト無し)
         env:

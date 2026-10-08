@@ -1,6 +1,7 @@
 # ローカル開発用のミドルウェア（DB と S3 エミュレータ）
 #   起動: docker compose up -d --wait     停止: docker compose down     データも消す: docker compose down -v
 # クラウドのサービスはエミュレータで代替し、ローカルからクラウドには接続しない。
+# ポートは 127.0.0.1（この PC の中）だけで待ち受ける。パスワードが固定の開発用なので、同じネットワークの他の PC からはつながらないようにする。
 name: app-dev
 
 services:
@@ -12,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-localpass}
       TZ: Asia/Tokyo
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro   # 初回起動時だけ実行される
@@ -29,7 +30,7 @@ services:
       COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${S3_BUCKET:-sample-bucket}
       initialBuckets: ${S3_BUCKET:-sample-bucket}
     ports:
-      - "${S3_PORT:-9090}:9090"
+      - "127.0.0.1:${S3_PORT:-9090}:9090"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/ || exit 1"]
       interval: 5s

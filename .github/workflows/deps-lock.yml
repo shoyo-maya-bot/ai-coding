@@ -43,7 +43,7 @@ jobs:
           uv pip compile tools/spec-trace/pyproject.toml "$RUNNER_TEMP/scripts.in" --extra dev \
             --universal --python-version 3.10 --no-emit-package devtools-common \
             --no-header --no-annotate -o constraints.txt
-          sed -i '1i # 自動生成（.github/workflows/deps-lock.yml）. 手で書き換えない. pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt で使う' constraints.txt
+          sed -i '1i # 自動生成（.github/workflows/deps-lock.yml）. 手で書き換えない. python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt で使う' constraints.txt
           cat constraints.txt
       - name: 変わっていればコミットして push する
         run: |

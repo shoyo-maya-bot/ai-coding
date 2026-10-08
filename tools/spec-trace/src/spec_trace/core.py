@@ -23,7 +23,7 @@ from devtools_common.config import load_structured
 from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
-from .code import is_generated_test, lookup_scenario, lookup_symbol, split_symbol
+from .code import is_generated_test, lookup_scenario, lookup_symbol, split_case, split_symbol
 from .results import FAILED, SKIPPED, TestResults, load_results
 
 log = get_logger(__name__)
@@ -308,7 +308,7 @@ def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: boo
     if results is None:
         return []
     owner, method = split_symbol(symbol)
-    cases = results.find(owner, method, generated)
+    cases = results.find(owner, method, generated, split_case(symbol)[1])
     if not cases:
         seen = results.names_in_class(owner)
         hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"

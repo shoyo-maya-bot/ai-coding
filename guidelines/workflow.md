@@ -50,6 +50,14 @@ flowchart TD
 
 直せないときは、理由と試したことを添えて人に相談します。
 
+エージェントの指示（`.github/copilot-instructions.md` と `.github/agents/` の 5 ファイル）には、上の一覧を次の 1 行に縮めて **そのまま** 複写します。
+一覧を変えたら、この 1 行と 6 ファイルの複写を同じ PR で直します（`scripts/check_docs.py` が、項目の数と 6 ファイルの文言の一致を確かめます。
+CI の docs ゲートと、push の前のフック（`.githooks/pre-push`）で実行）。
+
+<!-- prohibitions:begin -->
+禁止: テストの期待値を実装に合わせる、アサーションを消す・弱める、除外や `@SuppressWarnings` を理由なく足す、`@Disabled` / `@ignore`、対応表から要件を消す、閾値を下げる
+<!-- prohibitions:end -->
+
 「理由なく」とは、除外の設定（`config/spotbugs/exclude.xml` など）やアノテーションの横に、なぜ除外するのかを書いていないことです。
 理由を書いた除外も、RP2・RP3 のレビューで人が採否を決めます。
 

@@ -39,7 +39,7 @@ jobs:
       - name: install (constraints.txt で版を固定)
         run: |
           if [ -f constraints.txt ]; then c="-c constraints.txt"; else echo "::warning::constraints.txt がありません"; c=""; fi
-          pip install -e "tools/spec-trace[dev]" pyyaml $c
+          python -m pip install -e "tools/spec-trace[dev]" pyyaml $c
       - name: verify-gates
         run: |
           set -o pipefail
@@ -134,8 +134,8 @@ jobs:
       - name: install
         run: |
           if [ -f constraints.txt ]; then c="-c constraints.txt"; else c=""; fi
-          pip install -e tools/spec-trace pyyaml $c
-          pip install "bandit==1.8.6" "pip-audit==2.9.0"
+          python -m pip install -e tools/spec-trace pyyaml $c
+          python -m pip install "bandit==1.8.6" "pip-audit==2.9.0"
       - name: SAST（bandit. 中以上）
         run: bandit -q -r tools/spec-trace/src scripts -ll
       # devtools-common は git の URL で入れる（PyPI に無い）ので、pip-audit の対象から外れる（--skip-editable と同じ扱い）

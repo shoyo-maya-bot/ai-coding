@@ -31,21 +31,28 @@ class TestResults:
     cases: list[Case] = field(default_factory=list)
     files: int = 0
 
-    def find(self, owner: str | None, method: str, generated: bool = False) -> list[Case]:
+    def find(self, owner: str | None, method: str, generated: bool = False, case: str | None = None) -> list[Case]:
         """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）.
 
-        generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）
-        ときは、同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす
-        （同じクラスに複数あると区別できないので、全部をまとめて見る）。
+        - 結果の名前の「(引数の型)」と「[id]」を外してメソッド名を比べる
+          （test_x[case1]・parseRejects(String)[1] → test_x・parseRejects の実行分）
+        - case（対応表に test_x[case1] のように 1 件だけ書いたとき）は、その id の実行分だけを見る
+        - owner が無い（モジュールの関数 test_x）ときは、クラスの中の同名のメソッド（pytest の classname が
+          モジュール.クラス になるもの）を混ぜない。クラスの外の同名の関数が結果に無いときだけ、全部を見る
+        - generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）
+          ときは、同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす
+          （同じクラスに複数あると区別できないので、全部をまとめて見る）。
         """
-        out = []
-        for c in self.cases:
-            if _method_name(c.name) != method:
-                continue
-            if owner is None or _simple_class(c.classname) == owner:
-                out.append(c)
+        out = [c for c in self.cases if _method_name(c.name) == method]
+        if owner is not None:
+            out = [c for c in out if _simple_class(c.classname) == owner]
+        else:
+            module_level = [c for c in out if not _in_class(c.classname)]
+            out = module_level or out
         if not out and generated and owner is not None:
             out = [c for c in self.cases if _simple_class(c.classname) == owner and _INVOCATION.match(c.name)]
+        if case is not None:
+            out = [c for c in out if _case_id(c.name) == case]
         return out
 
     def names_in_class(self, owner: str | None, limit: int = 5) -> list[str]:
@@ -59,6 +66,32 @@ class TestResults:
 def _method_name(name: str) -> str:
     """'importsValid()' / 'parseRejects(String, String)[1]' / 'test_x[a-b]' → メソッド名."""
     return re.split(r"[(\[]", name, maxsplit=1)[0].strip()
+
+
+def _case_id(name: str) -> str | None:
+    """'test_x[case1]' → 'case1'、'parseRejects(String)[1]' → '1'、'[2] s = "c"'（Gradle 9）→ '2'、'test_x' → None."""
+    m = re.match(r"^\[(\d+)\]", name)
+    if m:
+        return m.group(1)
+    head = re.split(r"[(\[]", name, maxsplit=1)[0]
+    rest = name[len(head) :]
+    if rest.startswith("("):
+        depth = 0
+        for i, ch in enumerate(rest):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0:
+                rest = rest[i + 1 :]
+                break
+    if rest.startswith("[") and rest.endswith("]"):
+        return rest[1:-1]
+    return None
+
+
+def _in_class(classname: str) -> bool:
+    """pytest の classname がクラスを指すか（tests.test_x.TestFoo → True、tests.test_x → False）. Java は常に True."""
+    last = re.split(r"[.$]", classname)[-1]
+    return bool(last) and (last[0].isupper() or "$" in classname)
 
 
 def _simple_class(classname: str) -> str:

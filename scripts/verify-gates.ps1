@@ -3,14 +3,16 @@
 #   .\scripts\verify-gates.ps1 -Final    完了時・main と同じ（全要件 proven）
 # ゲートの一覧と順番は verify-gates.sh と同じにする（tests/test_verify_gates.py が確かめる）.
 # ゲートを通すためにチェックを甘くしないこと（guidelines/workflow.md の禁止事項）
-# 前提: Java 17、Python 3.10 以上で pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt
+# 前提: Java 17、Python 3.10 以上で python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt
 param([switch]$Final)
 # 外部コマンド（gradle・pip など）が標準エラーに書いただけでは止めない（結果は終了コードで判定する）
 $ErrorActionPreference = 'Continue'
 # Python の出力を UTF-8 にする（パイプやファイルに出すとき、Windows の既定の文字コードでは日本語を書けず落ちるため）
 $env:PYTHONUTF8 = '1'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$py = if ($env:PYTHON) { $env:PYTHON } elseif (Get-Command py -ErrorAction SilentlyContinue) { 'py' } else { 'python' }
+# Python は $env:PYTHON → python の順で選ぶ. py ランチャーは使わない（py は PATH の python と別の版・別の環境を選ぶことがあり、
+# python -m pip で入れた環境と違う Python でゲートを動かしてしまうため。手順書の python -m pip と同じ Python を使う）
+$py = if ($env:PYTHON) { $env:PYTHON } else { 'python' }
 $require = if ($Final) { 'proven' } else { 'implemented' }
 $results = @()
 function Invoke-Gate([string]$Name, [scriptblock]$Command) {

@@ -27,8 +27,22 @@ class Lookup:
     detail: str = ""
 
 
+def split_case(symbol: str) -> tuple[str, str | None]:
+    """パラメータ化テストの 1 件を指す書き方を分ける.
+
+    'test_x[case1]' → ('test_x', 'case1')、'Class#method[1.5-a]' → ('Class#method', '1.5-a')、
+    'test_x' → ('test_x', None).
+    角かっこの中（pytest の id）には . や :: が入ることがあるので、クラス名とメソッド名に分ける前に外す。
+    """
+    i = symbol.find("[")
+    if i > 0 and symbol.endswith("]"):
+        return symbol[:i], symbol[i + 1 : -1]
+    return symbol, None
+
+
 def split_symbol(symbol: str) -> tuple[str | None, str]:
-    """'Class#method' / 'Class.method' / 'method' → (クラス名 or None, 名前)."""
+    """'Class#method' / 'Class.method' / 'method' → (クラス名 or None, 名前). 末尾の [id] は外す."""
+    symbol, _ = split_case(symbol)
     for sep in ("#", "::", "."):
         if sep in symbol:
             owner, _, name = symbol.rpartition(sep)
