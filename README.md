@@ -112,12 +112,15 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 [template/UPSTREAM.yaml](template/UPSTREAM.yaml) に理由を書いた差分以外ずれていないことを確かめます（`python scripts/check_template_drift.py`）。
 依存ライブラリと Gradle の版は写し元で上げ、マージ後に `--ref main` で差分を見て取り込みます（手順は UPSTREAM.yaml の先頭）。
 そのため Dependabot は、template の写し元と揃える依存を上げません（template にだけある SpotBugs などは上げます）。
+写し元の main が進んで取り込むべき変更が溜まっていないかは、週 1 回の [template-drift](.github/workflows/template-drift.yml) が
+`--ref main` で確かめ、ずれがあれば Issue を 1 件作ります（開いている Issue があればコメントを足し、直ったら閉じる）。
 
 ## 変更点
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
 | 2026-10 | verify-gates.ps1 は `$env:PYTHON` → `python` の順で Python を選ぶ（`py` ランチャーを使わない）。手順は `python -m pip` | `py` だけで入れていた環境は、`python -m pip install …` で入れ直すか `$env:PYTHON` を指定する |
+| 2026-10 | template を写し元（dev-environment f497a2c）に合わせた: ポートを 127.0.0.1 だけで公開、Gradle の配布物の SHA-256 を検証、upload-sample が local/.env を読む | 同じネットワークの他の PC から DB・S3 エミュレータにつながらなくなる |
 | 2026-10 | 禁止事項の複写の一致を docs ゲートと pre-push で検査する | 禁止事項を変えるときは 7 ファイルを同じ PR で直す |
 | 2026-10 | verify-gates の既定が `--require implemented` になり、pytest・ruff・template drift も実行する。CI は verify-gates を呼ぶ | 手元で verify-gates を流すと、以前より時間がかかり、テスト・lint・ずれでも失敗する（CI と同じ結果になる） |
 | 2026-10 | spec-trace に `--test-results` を追加（CI と verify-gates で使用） | proven のテストが失敗・未実行・スキップなら D7 が落ちる |

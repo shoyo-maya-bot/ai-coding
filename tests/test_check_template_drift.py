@@ -165,6 +165,46 @@ class TemplateDriftTest(unittest.TestCase):
         cfg = drift.load_config(ROOT / "template/UPSTREAM.yaml")
         self.assertEqual(len(cfg.sha), 40)
 
+    # --- 第 2 回: 写し元 f497a2c の取り込みと、週 1 回の定期検査 ---
+
+    def test_template_follows_upstream_hardening(self):
+        # 写し元で入った変更（ポートを 127.0.0.1 だけで公開、Gradle の配布物の SHA-256 検証）を取り込んでいる
+        compose = (ROOT / "template/local/docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('"127.0.0.1:${DB_PORT:-5432}:5432"', compose)
+        self.assertIn('"127.0.0.1:${S3_PORT:-9090}:9090"', compose)
+        props = (ROOT / "template/gradle/wrapper/gradle-wrapper.properties").read_text(encoding="utf-8")
+        self.assertRegex(props, r"(?m)^distributionSha256Sum=[0-9a-f]{64}$")
+
+    def test_weekly_workflow(self):
+        import yaml
+
+        wf = yaml.safe_load((ROOT / ".github/workflows/template-drift.yml").read_text(encoding="utf-8"))
+        on = wf.get("on") or wf.get(True)  # YAML 1.1 では on が True になる
+        self.assertIn("schedule", on)
+        cron = on["schedule"][0]["cron"].split()
+        self.assertEqual(len(cron), 5)
+        self.assertNotEqual(cron[4], "*", "週 1 回（曜日を指定）")
+        # 権限は最小: 全体は contents: read、Issue を書くジョブだけ issues: write
+        self.assertEqual(wf["permissions"], {"contents": "read"})
+        jobs = wf["jobs"]
+        self.assertNotIn("permissions", jobs["drift"])
+        self.assertEqual(jobs["report"]["permissions"], {"issues": "write"})
+        steps = jobs["drift"]["steps"]
+        self.assertFalse(steps[0]["with"]["persist-credentials"])
+        run = "\n".join(st.get("run", "") for st in steps)
+        self.assertIn("scripts/check_template_drift.py --ref main", run)
+        # 既存の開いている Issue があれば作らずにコメントする（重複を作らない）
+        report = "\n".join(st.get("run", "") for st in jobs["report"]["steps"])
+        self.assertIn("gh issue list --state open", report)
+        self.assertIn('if [ -n "$number" ]', report)
+        self.assertIn("gh issue comment", report)
+        self.assertLess(report.index("gh issue comment"), report.index("gh issue create"))
+        # 使う Action は SHA で固定
+        for job in jobs.values():
+            for st in job["steps"]:
+                if "uses" in st:
+                    self.assertRegex(st["uses"], r"@[0-9a-f]{40}$")
+
 
 if __name__ == "__main__":
     unittest.main()
