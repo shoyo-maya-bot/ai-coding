@@ -37,7 +37,11 @@ proven の要件のテストごとに、結果の中に **実行されて成功�
 spec-trace check traceability/specs --root . --require proven --test-results template/build/test-results/test
 ```
 
-- 照合はクラス名（単純名）とメソッド名で行う。パラメータ化テスト（`parseRejects(String, String)[1]` など）は、全実行分が成功していれば成功
+- 照合は **パッケージ付きのクラス名** とメソッド名で行う。Java / Kotlin 等はテストのソースの `package` 宣言 + クラス名
+  （`com.example.app.order.OrderImportServiceTest`。`package` が無ければ無名パッケージ）、Python はテストファイルのパス
+  （`tests/test_x.py` → `tests.test_x`。pytest の rootdir の違いで先頭が増減しても照合できるよう、短い方が長い方の末尾に一致すればよい）。
+  別のパッケージ・モジュールにある同名のテストクラスの結果は数えない。TypeScript などは従来どおりクラス名（単純名）で照合する
+- パラメータ化テスト（`parseRejects(String, String)[1]` など）は、全実行分が成功していれば成功
 - pytest の `parametrize`（結果の名前が `test_x[case1]` など）も同じく、全実行分が成功していれば成功。対応表の `symbol` に
   `test_x[case1]`（`Class#method[2]`）と 1 件だけ書くと、その id の実行分だけを照合する（id の中の `.` や `::` はそのまま書ける）
 - クラスの外の関数（`test_x`）は、別のクラスの同名のメソッドの結果と混ぜない

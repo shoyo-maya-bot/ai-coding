@@ -538,6 +538,51 @@ class TestResultsTest(Base):
         rc, data = self.check("--test-results", str(self.results(pytest=junit)))
         self.assertEqual((rc, self.rules(data)), (0, []))
 
+    def test_same_simple_class_name_in_other_package_is_not_counted(self):
+        # 別のパッケージの同名のテストクラス（com.example.other.OrderImportJobTest）の成功を、
+        # 対応表のテスト（package com.example.batch.order）の成功とみなさない
+        junit = JUNIT_OK.replace("com.example.batch.order.OrderImportJobTest", "com.example.other.OrderImportJobTest")
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_not_run"][0]
+        self.assertIn("com.example.other.OrderImportJobTest", f["message"])
+
+    def test_other_package_failure_does_not_fail_this_test(self):
+        junit = JUNIT_OK.replace(
+            "</testsuite>",
+            '<testcase name="importOrders_skipsExisting()" classname="com.example.other.OrderImportJobTest">'
+            '<failure message="other package"/></testcase></testsuite>',
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_java_default_package_matches_only_unqualified_classname(self):
+        self.edit("java/test/OrderImportJobTest.java", "package com.example.batch.order;", "")
+        rc, data = self.check("--test-results", str(self.results()))
+        self.assertIn("trace.proof_not_run", self.rules(data))
+        junit = JUNIT_OK.replace("com.example.batch.order.OrderImportJobTest", "OrderImportJobTest")
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_python_same_class_in_other_module_is_not_counted(self):
+        pytest = PYTEST_OK.replace("tests.test_order_import.TestOrderValidator", "tests.test_other.TestOrderValidator")
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_python_module_function_in_other_module_is_not_counted(self):
+        pytest = PYTEST_OK.replace('"tests.test_order_import" name=', '"tests.test_other" name=')
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_python_rootdir_prefix_difference_is_tolerated(self):
+        # pytest の rootdir が上の階層だと classname の先頭が増える（project.tests.test_order_import…）
+        pytest = PYTEST_OK.replace('classname="tests.', 'classname="project.tests.')
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
     def test_java_parameterized_case_id(self):
         self.use_parameterized_test()
         self.edit("traceability/order-import.yaml", "OrderImportJobTest#other", "OrderImportJobTest#other[2]")
@@ -602,7 +647,9 @@ class SourceRequiredTest(Base):
 
 # --- パラメータ化テストの結果は、メソッドごとに厳密に対応づける ---
 
-TWO_PARAMETERIZED = """class PTest {
+TWO_PARAMETERIZED = """package com.example;
+
+class PTest {
     @ParameterizedTest
     @CsvSource({"a, b", "c, d"})
     void parseRejects(String line, String message) {

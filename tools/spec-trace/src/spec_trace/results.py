@@ -26,15 +26,64 @@ class Case:
     source: str = ""  # 読んだ XML ファイル
 
 
+_PACKAGE = re.compile(r"^\s*package\s+([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*;?", re.M)
+_JVM_SUFFIXES = {".java", ".kt", ".kts", ".groovy", ".scala"}
+
+
+@dataclass(frozen=True)
+class Origin:
+    """テストのソースの場所. 結果の classname を、単純なクラス名ではなくパッケージ・モジュールまで含めて照合する.
+
+    - Java / Kotlin 等: ソースの package 宣言 + クラス名（com.example.a.FooTest）。入れ子のクラスは Outer$Inner
+    - Python: ファイルのパス（拡張子なし）。pytest の classname（rootdir からの相対の「.」区切り）と、
+      短い方がもう一方の末尾に一致すること（rootdir の違いで先頭が増減しても照合できる）
+    - それ以外（TypeScript など）: None（従来どおり単純名で照合）
+    """
+
+    kind: str  # "jvm" / "python"
+    package: str = ""  # jvm: パッケージ（無名パッケージは ""）
+    module: tuple[str, ...] = ()  # python: ファイルのパスの各部（拡張子なし）
+
+    @classmethod
+    def of(cls, path: Path, rel: str) -> Origin | None:
+        if path.suffix in _JVM_SUFFIXES:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            m = _PACKAGE.search(text)
+            return cls("jvm", package=re.sub(r"\s+", "", m.group(1)) if m else "")
+        if path.suffix == ".py":
+            parts = tuple(p for p in Path(rel).with_suffix("").parts if p not in (".", "..", "/", "\\"))
+            return cls("python", module=parts)
+        return None
+
+    def matches(self, classname: str) -> bool:
+        if self.kind == "jvm":
+            if not self.package:
+                return "." not in classname
+            prefix = self.package + "."
+            return classname.startswith(prefix) and "." not in classname[len(prefix) :]
+        parts = tuple(classname.split("."))
+        module = parts[:-1] if _in_class(classname) else parts
+        n = min(len(module), len(self.module))
+        return n > 0 and module[-n:] == self.module[-n:]
+
+
 @dataclass
 class TestResults:
     cases: list[Case] = field(default_factory=list)
     files: int = 0
 
     def find(
-        self, owner: str | None, method: str, params: tuple[str, ...] | None = None, case: str | None = None
+        self,
+        owner: str | None,
+        method: str,
+        params: tuple[str, ...] | None = None,
+        case: str | None = None,
+        origin: Origin | None = None,
     ) -> list[Case]:
-        """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）.
+        """クラス名とメソッド名に当たる結果（パラメータ化テストは全実行分）.
+
+        - origin（テストのソースの場所）があれば、classname をパッケージ・モジュールまで含めて照合する
+          （別のパッケージにある同名のテストクラスの結果を、このテストの結果とみなさない）
 
         - 結果の名前の「(引数の型)」と「[id]」を外してメソッド名を比べる
           （test_x[case1]・parseRejects(String)[1] → test_x・parseRejects の実行分）
@@ -47,7 +96,8 @@ class TestResults:
           （別のパラメータ化テストの成功を数えない。引数名の並びが同じメソッドが 2 つ以上あると区別できないので、
           どちらの実行分ともみなさない＝実行されていない扱い）
         """
-        out = [c for c in self.cases if _method_name(c.name) == method]
+        cases = [c for c in self.cases if origin is None or origin.matches(c.classname)]
+        out = [c for c in cases if _method_name(c.name) == method]
         if owner is not None:
             out = [c for c in out if _simple_class(c.classname) == owner]
         else:
@@ -56,7 +106,7 @@ class TestResults:
         if not out and params and owner is not None:
             out = [
                 c
-                for c in self.cases
+                for c in cases
                 if _simple_class(c.classname) == owner
                 and _INVOCATION.match(c.name)
                 and invocation_params(c.name) == params
@@ -76,10 +126,10 @@ class TestResults:
         return same_feature or out
 
     def names_in_class(self, owner: str | None, limit: int = 5) -> list[str]:
-        """クラス（単純名）の結果にあるテスト名（見つからないときの手がかり）."""
+        """クラス（単純名）の結果にあるテスト名（見つからないときの手がかり. classname 付き）."""
         if owner is None:
             return []
-        names = [c.name for c in self.cases if _simple_class(c.classname) == owner]
+        names = [f"{c.classname}#{c.name}" for c in self.cases if _simple_class(c.classname) == owner]
         return names[:limit]
 
 
