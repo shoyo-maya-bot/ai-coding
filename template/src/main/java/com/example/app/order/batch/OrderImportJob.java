@@ -20,6 +20,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>終了コード: 0 正常 / 4 形式エラーの行あり（取込は続行）/ 8 異常終了。実案件では運用設計の終了コード体系に合わせる。
  * ジョブ ID の誤り・未指定は {@link com.example.app.batch.BatchJobGuard} が 8 にする。
+ *
+ * <p>入力は全体をメモリに読み（上限 {@code app.batch.max-input-bytes}。{@link DefaultFileFetcher}）、ファイル全体を 1 トランザクションで登録する
+ * （local/README.md の「取込の大きさとコミットの単位」）。
  */
 @Component
 @ConditionalOnProperty(name = "app.batch.job", havingValue = "JOB0001")
