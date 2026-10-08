@@ -120,6 +120,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 | 時期 | 変更 | 影響 |
 |---|---|---|
 | 2026-10 | verify-gates.ps1 は `$env:PYTHON` → `python` の順で Python を選ぶ（`py` ランチャーを使わない）。手順は `python -m pip` | `py` だけで入れていた環境は、`python -m pip install …` で入れ直すか `$env:PYTHON` を指定する |
+| 2026-10 | template を写し元（dev-environment f8ad74d）に合わせた: `local/docker-compose.yml` のイメージ（DB・S3 エミュレータ）を `タグ@sha256:digest` で固定。spec-trace の devtools-common の固定を 2e25f8a に | `docker compose pull` しても同じタグの別の中身に変わらない。イメージの更新は写し元の Dependabot の後に取り込む |
 | 2026-10 | template を写し元（dev-environment f497a2c）に合わせた: ポートを 127.0.0.1 だけで公開、Gradle の配布物の SHA-256 を検証、upload-sample が local/.env を読む | 同じネットワークの他の PC から DB・S3 エミュレータにつながらなくなる |
 | 2026-10 | 禁止事項の複写の一致を docs ゲートと pre-push で検査する | 禁止事項を変えるときは 7 ファイルを同じ PR で直す |
 | 2026-10 | verify-gates の既定が `--require implemented` になり、pytest・ruff・template drift も実行する。CI は verify-gates を呼ぶ | 手元で verify-gates を流すと、以前より時間がかかり、テスト・lint・ずれでも失敗する（CI と同じ結果になる） |

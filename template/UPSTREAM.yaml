@@ -9,7 +9,7 @@
 #   3. 下の sha を写し元の main のコミットに更新し、もう一度 python scripts/check_template_drift.py が通ることを確かめる
 # このため .github/dependabot.yml の template の gradle は、写し元と揃える依存（keep_in_sync の対象）を ignore にしている。
 repo: shoyo-maya-bot/dev-environment
-sha: f497a2c875793e4bbacba0252c043bc34a852e02
+sha: f8ad74d56d7484aa08e704d0aa35e5212f8ce1c3
 
 # 写し元のディレクトリ → template 内のディレクトリ
 mappings:
