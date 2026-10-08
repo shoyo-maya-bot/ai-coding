@@ -6,6 +6,8 @@
 - YAML / JSON ファイルが構文として読める
 - Copilot のプロンプト・指示ファイルの Front Matter が読め、必須キーがある
 - Copilot のファイル（エージェント・プロンプト・指示）のコマンドに `&&` が無い（Windows PowerShell 5.1 で動かない）
+- 禁止事項（guidelines/workflow.md）の 1 行の要約が、エージェントの指示 6 ファイルにそのまま複写されている
+  （正の一覧の項目数と要約の項目数も一致する）. CI の docs ゲートと .githooks/pre-push で実行する
 
 対象は git 管理下のファイル（git が使えないときはフォルダを走査）。
 終了コード: 0 問題なし / 1 問題あり
@@ -249,6 +251,65 @@ def check_commands(root: Path, files: list[Path]) -> list[str]:
     return errs
 
 
+# 禁止事項の正と、その 1 行の要約を複写するファイル（正を含めて 7 ファイル）
+PROHIBITIONS_SOURCE = "guidelines/workflow.md"
+PROHIBITIONS_HEADING = "## 禁止事項"
+PROHIBITIONS_COPIES = (
+    ".github/copilot-instructions.md",
+    ".github/agents/coder.agent.md",
+    ".github/agents/orchestrator.agent.md",
+    ".github/agents/planner.agent.md",
+    ".github/agents/reviewer.agent.md",
+    ".github/agents/tester.agent.md",
+)
+PROHIBITIONS_BLOCK = re.compile(r"<!-- prohibitions:begin -->\s*\n(.*?)\n\s*<!-- prohibitions:end -->", re.S)
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s)).strip()
+
+
+def check_prohibitions(root: Path) -> list[str]:
+    """禁止事項の要約が 6 ファイルにそのまま複写されているか（どれか 1 つだけ直して食い違うのを防ぐ）."""
+    src = root / PROHIBITIONS_SOURCE
+    if not src.is_file():
+        return [f"{PROHIBITIONS_SOURCE}: ありません（禁止事項の正）"]
+    text = src.read_text(encoding="utf-8")
+    m = PROHIBITIONS_BLOCK.search(text)
+    if not m:
+        return [f"{PROHIBITIONS_SOURCE}: 禁止事項の要約（<!-- prohibitions:begin --> 〜 end）がありません"]
+    summary = _norm(m.group(1))
+    if not summary.startswith("禁止: "):
+        return [f"{PROHIBITIONS_SOURCE}: 禁止事項の要約は「禁止: 」で始めてください"]
+    errs: list[str] = []
+    # 正の一覧（見出しの下の箇条書き）と要約の項目数が同じか（一覧に足して要約を直し忘れるのを防ぐ）
+    sec = re.search(rf"(?ms)^{re.escape(PROHIBITIONS_HEADING)}[^\n]*\n(.*?)(?=^## |\Z)", text)
+    # 一覧は見出しの直後の箇条書き（要約のブロックより前）
+    items = re.findall(r"(?m)^- ", sec.group(1).split("<!-- prohibitions:begin -->")[0]) if sec else []
+    n_summary = len(summary.removeprefix("禁止: ").split("、"))
+    if sec is None:
+        errs.append(f"{PROHIBITIONS_SOURCE}: 見出し「{PROHIBITIONS_HEADING}」がありません")
+    elif len(items) != n_summary:
+        errs.append(
+            f"{PROHIBITIONS_SOURCE}: 禁止事項の一覧（{len(items)} 項目）と要約（{n_summary} 項目）の数が違います。"
+            "要約も直してください"
+        )
+    for rel in PROHIBITIONS_COPIES:
+        p = root / rel
+        if not p.is_file():
+            errs.append(f"{rel}: ありません（禁止事項の複写先）")
+            continue
+        lines = [_norm(line.lstrip("- ")) for line in p.read_text(encoding="utf-8").splitlines()]
+        if summary not in lines:
+            near = [line for line in lines if line.startswith("禁止")]
+            hint = f"（今の行: {near[0][:60]}…）" if near else "（「- 禁止: 」の行がありません）"
+            errs.append(
+                f"{rel}: 禁止事項が {PROHIBITIONS_SOURCE} の要約と一致しません{hint}。"
+                "要約の 1 行をそのまま複写してください"
+            )
+    return errs
+
+
 def verify(root: Path) -> list[str]:
     files = repo_files(root)
     return (
@@ -257,6 +318,7 @@ def verify(root: Path) -> list[str]:
         + check_parse(root, files)
         + check_copilot(root, files)
         + check_commands(root, files)
+        + check_prohibitions(root)
     )
 
 

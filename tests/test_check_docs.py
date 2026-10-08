@@ -11,6 +11,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_docs  # noqa: E402
 
+SUMMARY = "禁止: 期待値を実装に合わせる、アサーションを消す・弱める"
+PROHIBITION_SOURCE = (
+    "# 進め方\n\n## 禁止事項（ゲートのこじ開け）\n\n- 期待値を実装に合わせる\n- アサーションを消す・弱める\n\n"
+    f"<!-- prohibitions:begin -->\n{SUMMARY}\n<!-- prohibitions:end -->\n\n## 次の節\n\n- 関係ない項目\n"
+)
+
 
 class CheckDocsTest(unittest.TestCase):
     def setUp(self):
@@ -31,6 +37,10 @@ class CheckDocsTest(unittest.TestCase):
         self.write(".github/instructions/java.instructions.md", '---\napplyTo: "**/*.java"\n---\n\n- rule\n')
         self.write(".github/prompts/run.prompt.md", "---\ndescription: 実行する\n---\n\n本文\n")
         self.write(".github/skills/demo/SKILL.md", "---\nname: demo\ndescription: デモ\n---\n\n# demo\n")
+        # 禁止事項の正と複写先（7 ファイル）
+        self.write("guidelines/workflow.md", PROHIBITION_SOURCE)
+        for rel in check_docs.PROHIBITIONS_COPIES:
+            self.write(rel, f"---\ndescription: x\n---\n\n- 前の行\n- {SUMMARY}\n- 後の行\n")
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -58,7 +68,7 @@ class CheckDocsTest(unittest.TestCase):
         self.write(
             ".github/agents/coder.agent.md",
             "---\ndescription: x\n---\n\n1. `cd template && ./gradlew test` を実行する\n"
-            "2. `&&` は使えない（説明は可）\n",
+            f"2. `&&` は使えない（説明は可）\n\n- {SUMMARY}\n",
         )
         errs = self.errors()
         self.assertEqual(len(errs), 1, errs)
@@ -72,6 +82,47 @@ class CheckDocsTest(unittest.TestCase):
     def test_ampersands_outside_copilot_files_are_allowed(self):
         self.write("docs/bash.md", "# bash\n\n```bash\ncd a && b\n```\n")
         self.assertEqual(self.errors(), [])
+
+    # --- 第 2 回の指摘: 禁止事項の 7 ファイルへの複写の一致 ---
+
+    def test_prohibitions_copy_differs(self):
+        # 1 ファイルだけ書き換える（項目を落とす）と、そのファイルを指して失敗する
+        rel = ".github/agents/tester.agent.md"
+        self.write(rel, "---\ndescription: x\n---\n\n- 禁止: 期待値を実装に合わせる\n")
+        errs = self.errors()
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn(rel, errs[0])
+        self.assertIn("一致しません", errs[0])
+
+    def test_prohibitions_copy_missing_line_or_file(self):
+        self.write(".github/agents/coder.agent.md", "---\ndescription: x\n---\n\n- 何もない\n")
+        self.assertError("coder.agent.md", "「- 禁止: 」の行がありません")
+        (self.tmp / ".github/agents/planner.agent.md").unlink()
+        self.assertError("planner.agent.md", "ありません")
+
+    def test_prohibitions_list_and_summary_count(self):
+        # 正の一覧に項目を足して、要約を直し忘れた
+        self.write(
+            "guidelines/workflow.md", PROHIBITION_SOURCE.replace("- アサーション", "- 閾値を下げる\n- アサーション")
+        )
+        self.assertError("guidelines/workflow.md", "3 項目", "2 項目")
+
+    def test_prohibitions_summary_block_required(self):
+        self.write("guidelines/workflow.md", "# 進め方\n\n## 禁止事項\n\n- a\n")
+        self.assertError("guidelines/workflow.md", "prohibitions:begin")
+
+    def test_prohibitions_whitespace_and_width_are_normalized(self):
+        # 全角・半角や行頭の空白の違いは同じとみなす（NFKC）
+        rel = ".github/agents/reviewer.agent.md"
+        self.write(rel, f"---\ndescription: x\n---\n\n-   {SUMMARY.replace(':', '：')}\n")
+        self.assertEqual(self.errors(), [])
+
+    def test_pre_push_hook_runs_check_docs(self):
+        hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+        self.assertTrue(hook.startswith("#!/usr/bin/env sh"))
+        self.assertIn("scripts/check_docs.py", hook)
+        self.assertIn("exit 1", hook)
+        self.assertIn("git config core.hooksPath .githooks", (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_missing_link_target(self):
         self.write("README.md", "[なし](docs/none.md)\n")
