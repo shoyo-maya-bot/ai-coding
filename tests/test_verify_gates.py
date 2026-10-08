@@ -54,6 +54,21 @@ class VerifyGatesTest(unittest.TestCase):
         # Windows PowerShell 5.1 は && を解釈できない
         self.assertNotIn("&&", PS1)
 
+    def test_powershell_picks_python_env_then_python_not_py_launcher(self):
+        # 第 2 回の指摘: py ランチャーを優先すると、python -m pip で入れた環境と別の Python でゲートを動かしてしまう
+        code = [line for line in PS1.splitlines() if not line.lstrip().startswith("#")]
+        assign = [line for line in code if re.match(r"\s*\$py\s*=", line)]
+        self.assertEqual(assign, ["$py = if ($env:PYTHON) { $env:PYTHON } else { 'python' }"])
+        self.assertFalse(any(re.search(r"Get-Command\s+py\b|'py'", line) for line in code), "py ランチャーを使わない")
+        self.assertIn('PY="${PYTHON:-python3}"', SH)
+
+    def test_install_instructions_use_python_m_pip(self):
+        for rel in ("README.md", "scripts/verify-gates.sh", "scripts/verify-gates.ps1", "tools/spec-trace/README.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8-sig")
+            with self.subTest(rel=rel):
+                self.assertIn("python -m pip install", text)
+                self.assertIsNone(re.search(r"(?<!-m )\bpip install", text), "pip install は python -m pip に")
+
     def test_ci_calls_both_scripts(self):
         self.assertIn("./scripts/verify-gates.sh", CI)
         self.assertIn(".\\scripts\\verify-gates.ps1", CI)

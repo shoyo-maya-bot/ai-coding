@@ -5,7 +5,7 @@
 品質ゲート D6〜D8・D10（[../../guidelines/quality-gates.md](../../guidelines/quality-gates.md)）の実体です。
 
 ```bash
-pip install -e tools/spec-trace                 # リポジトリのルートで
+python -m pip install -e tools/spec-trace       # リポジトリのルートで
 spec-trace check traceability/specs --root . --require proven
 spec-trace pin traceability/specs/order-import.yaml --root .   # 設計書の承認後に人が実行
 spec-trace schema                                # 定義ファイルの JSON Schema
@@ -35,6 +35,9 @@ spec-trace check traceability/specs --root . --require proven --test-results tem
 ```
 
 - 照合はクラス名（単純名）とメソッド名で行う。パラメータ化テスト（`parseRejects(String, String)[1]` など）は、全実行分が成功していれば成功
+- pytest の `parametrize`（結果の名前が `test_x[case1]` など）も同じく、全実行分が成功していれば成功。対応表の `symbol` に
+  `test_x[case1]`（`Class#method[2]`）と 1 件だけ書くと、その id の実行分だけを照合する（id の中の `.` や `::` はそのまま書ける）
+- クラスの外の関数（`test_x`）は、別のクラスの同名のメソッドの結果と混ぜない
 - Gradle 9 の結果では、パラメータ化テスト（`@ParameterizedTest` など）の 1 回分の名前が `[1] 引数…` になり、メソッド名が出ない。
   そのため、テストのソースにこれらのアノテーションがあるメソッドは、同じクラスの `[番号] …` の結果をまとめて見る
   （同じクラスにパラメータ化テストが複数あると区別できず、どれか 1 つの失敗で全部が失敗扱いになる）
