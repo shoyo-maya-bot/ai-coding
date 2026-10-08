@@ -6,7 +6,8 @@ name: app-dev
 
 services:
   db:
-    image: postgres:16
+    # タグ@sha256:digest で固定する（同じタグの中身が差し替わっても、全員が同じイメージを使う）. 更新は Dependabot（docker-compose）
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     environment:
       POSTGRES_DB: ${DB_NAME:-sampledb}
       POSTGRES_USER: ${DB_USER:-app}
@@ -25,7 +26,7 @@ services:
 
   s3:
     # S3 互換のエミュレータ。チームで別の製品を使う場合は .env の S3_EMULATOR_IMAGE で差し替える
-    image: ${S3_EMULATOR_IMAGE:-adobe/s3mock:3.12.0}
+    image: ${S3_EMULATOR_IMAGE:-adobe/s3mock:3.12.0@sha256:9da9c179bc0d1cb6986a40fd7ffbbc6deee11522b3892217ca350d65596126fa}
     environment:
       COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${S3_BUCKET:-sample-bucket}
       initialBuckets: ${S3_BUCKET:-sample-bucket}

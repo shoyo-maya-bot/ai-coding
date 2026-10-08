@@ -175,6 +175,12 @@ class TemplateDriftTest(unittest.TestCase):
         props = (ROOT / "template/gradle/wrapper/gradle-wrapper.properties").read_text(encoding="utf-8")
         self.assertRegex(props, r"(?m)^distributionSha256Sum=[0-9a-f]{64}$")
 
+    def test_template_follows_upstream_digest_pin(self):
+        # 写し元 f8ad74d で入った変更（compose のイメージを タグ@sha256:digest で固定）を取り込んでいる
+        compose = (ROOT / "template/local/docker-compose.yml").read_text(encoding="utf-8")
+        self.assertRegex(compose, r"(?m)^\s*image: postgres:16@sha256:[0-9a-f]{64}$")
+        self.assertRegex(compose, r"(?m)^\s*image: \$\{S3_EMULATOR_IMAGE:-[^}@]+@sha256:[0-9a-f]{64}\}$")
+
     def test_weekly_workflow(self):
         import yaml
 
