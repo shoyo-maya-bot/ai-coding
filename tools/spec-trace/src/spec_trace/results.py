@@ -31,7 +31,9 @@ class TestResults:
     cases: list[Case] = field(default_factory=list)
     files: int = 0
 
-    def find(self, owner: str | None, method: str, generated: bool = False, case: str | None = None) -> list[Case]:
+    def find(
+        self, owner: str | None, method: str, params: tuple[str, ...] | None = None, case: str | None = None
+    ) -> list[Case]:
         """クラス名（単純名）とメソッド名に当たる結果（パラメータ化テストは全実行分）.
 
         - 結果の名前の「(引数の型)」と「[id]」を外してメソッド名を比べる
@@ -39,9 +41,11 @@ class TestResults:
         - case（対応表に test_x[case1] のように 1 件だけ書いたとき）は、その id の実行分だけを見る
         - owner が無い（モジュールの関数 test_x）ときは、クラスの中の同名のメソッド（pytest の classname が
           モジュール.クラス になるもの）を混ぜない。クラスの外の同名の関数が結果に無いときだけ、全部を見る
-        - generated（パラメータ化テストなど）で、結果の名前にメソッド名が無い（Gradle は「[1] 引数…」にする）
-          ときは、同じクラスの「[番号] …」の結果をそのメソッドの実行分とみなす
-          （同じクラスに複数あると区別できないので、全部をまとめて見る）。
+        - params（パラメータ化テストの引数名. パラメータ化テストでなければ None）があり、結果の名前にメソッド名が無い
+          （Gradle は「[1] line = "…", message = "…"」にする）ときは、同じクラスの「[番号] 引数名 = 値, …」のうち、
+          **引数名の並びがこのメソッドと同じ** 結果だけをこのメソッドの実行分とみなす
+          （別のパラメータ化テストの成功を数えない。引数名の並びが同じメソッドが 2 つ以上あると区別できないので、
+          どちらの実行分ともみなさない＝実行されていない扱い）
         """
         out = [c for c in self.cases if _method_name(c.name) == method]
         if owner is not None:
@@ -49,11 +53,27 @@ class TestResults:
         else:
             module_level = [c for c in out if not _in_class(c.classname)]
             out = module_level or out
-        if not out and generated and owner is not None:
-            out = [c for c in self.cases if _simple_class(c.classname) == owner and _INVOCATION.match(c.name)]
+        if not out and params and owner is not None:
+            out = [
+                c
+                for c in self.cases
+                if _simple_class(c.classname) == owner
+                and _INVOCATION.match(c.name)
+                and invocation_params(c.name) == params
+            ]
         if case is not None:
             out = [c for c in out if _case_id(c.name) == case]
         return out
+
+    def find_scenario(self, scenario: str, feature: str = "") -> list[Case]:
+        """シナリオ名に当たる結果（Karate の JUnit XML. 名前の先頭の「[1:5] 」などの番号は外して比べる）.
+
+        同じ名前のシナリオが別の Feature にもあるときは、classname の最後が Feature のファイル名（拡張子なし）の
+        結果を優先する。
+        """
+        out = [c for c in self.cases if _scenario_name(c.name) == scenario]
+        same_feature = [c for c in out if feature and _simple_class(c.classname) == feature]
+        return same_feature or out
 
     def names_in_class(self, owner: str | None, limit: int = 5) -> list[str]:
         """クラス（単純名）の結果にあるテスト名（見つからないときの手がかり）."""
@@ -61,6 +81,50 @@ class TestResults:
             return []
         names = [c.name for c in self.cases if _simple_class(c.classname) == owner]
         return names[:limit]
+
+
+_SCENARIO_PREFIX = re.compile(r"^\[[\d.:]+\]\s*|^(?:Scenario(?: Outline)?|Example|シナリオ(?:アウトライン)?)\s*:\s*")
+
+
+def _scenario_name(name: str) -> str:
+    """'[1:5] 登録した会員を照会できる' / 'Scenario: x' → シナリオ名."""
+    prev = None
+    while prev != name:
+        prev, name = name, _SCENARIO_PREFIX.sub("", name, count=1)
+    return name.strip()
+
+
+_PARAM = re.compile(r"([A-Za-z_$][\w$]*) = ")
+
+
+def invocation_params(name: str) -> tuple[str, ...] | None:
+    """'[1] line = "a, b", message = "c"' → ('line', 'message'). 引数名の無い名前（'[1] a, b'）は None.
+
+    文字列の値（"…"）の中の「, x = 」は引数名とみなさない。
+    """
+    m = _INVOCATION.match(name)
+    if not m:
+        return None
+    rest = name[m.end() :].lstrip()
+    names: list[str] = []
+    while rest:
+        pm = _PARAM.match(rest)
+        if not pm:
+            return None
+        names.append(pm.group(1))
+        rest = rest[pm.end() :]
+        if rest.startswith('"'):  # 文字列の値: 閉じる " まで（\" は値の一部）
+            i = 1
+            while i < len(rest) and rest[i] != '"':
+                i += 2 if rest[i] == "\\" else 1
+            rest = rest[i + 1 :]
+            if rest and not rest.startswith(", "):
+                return None
+        else:  # 文字列以外の値: 次の「, 引数名 = 」まで
+            nxt = re.search(r", (?=[A-Za-z_$][\w$]* = )", rest)
+            rest = rest[nxt.start() :] if nxt else ""
+        rest = rest[2:] if rest.startswith(", ") else rest
+    return tuple(names) or None
 
 
 def _method_name(name: str) -> str:

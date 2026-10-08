@@ -23,8 +23,8 @@ from devtools_common.config import load_structured
 from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
-from .code import is_generated_test, lookup_scenario, lookup_symbol, split_case, split_symbol
-from .results import FAILED, SKIPPED, TestResults, load_results
+from .code import generated_test_params, lookup_scenario, lookup_symbol, split_case, split_symbol
+from .results import FAILED, SKIPPED, Case, TestResults, load_results
 
 log = get_logger(__name__)
 
@@ -103,7 +103,18 @@ def collect_specs(paths: list[Path]) -> list[Path]:
 def _check_drift(spec: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
     source = spec.get("source")
     if not source:
-        return []
+        # スキーマで必須にしているが、スキーマを通さずに呼ばれたときも黙って通さない（ドリフトを検知できない）
+        return [
+            Finding(
+                "trace.source_unspecified",
+                Severity.ERROR if st.enforce_drift else Severity.WARNING,
+                "根拠の設計書（source）が書かれていないため、ドリフト検知をしていません",
+                location=loc,
+                field="source",
+                suggestion="対応表のトップレベルに source: で設計書のパス（--root からの相対）を書き、"
+                "承認後に pin する",
+            )
+        ]
     path = st.root / source
     if not path.is_file():
         return [
@@ -205,6 +216,8 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                 suggestion="この要件を確かめるテストを proofs に書くか、状態を implemented に戻す",
             )
         ]
+    # シナリオ（.feature）だけで裏付けている要件か. 実行結果を照合できないシナリオだけでは proven にしない
+    scenario_only = all(Path(it["file"]).suffix == ".feature" or it.get("scenario") for it in items)
     for it in items:
         path = st.root / it["file"]
         if not path.is_file():
@@ -257,17 +270,7 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                     )
                 )
             elif st.results() is not None:
-                out.append(
-                    Finding(
-                        "trace.proof_result_unchecked",
-                        Severity.WARNING,
-                        f"シナリオ「{name}」は実行結果を照合していません（存在と結果の確認の有無だけを見ています）",
-                        location=loc,
-                        field="proofs.scenario",
-                        actual=it["file"],
-                        suggestion="シナリオの実行結果（Karate の JUnit XML）も --test-results に渡すと照合できる",
-                    )
-                )
+                out += _check_scenario_result(name, path, it["file"], loc, st, scenario_only)
             continue
         symbol = it.get("symbol")
         if not symbol:
@@ -310,17 +313,59 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                 )
             )
         elif st.results() is not None:
-            out += _check_result(symbol, it["file"], loc, st, is_generated_test(path, symbol))
+            out += _check_result(symbol, it["file"], loc, st, generated_test_params(path, symbol))
     return out
 
 
-def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: bool) -> list[Finding]:
-    """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる."""
+def _check_scenario_result(name: str, path: Path, file: str, loc: str, st: Settings, only: bool) -> list[Finding]:
+    """シナリオ（.feature）の実行結果を照合する.
+
+    Karate の JUnit XML（テスト名がシナリオ名. 先頭の [1:5] などの番号は外して比べる）に結果があれば、
+    失敗・スキップを見る。結果が無いとき、シナリオだけで裏付けている要件（only）は未証明（エラー）にし、
+    単体テストでも裏付けている要件は警告にとどめる。
+    """
+    results = st.results()
+    if results is None:
+        return []
+    cases = results.find_scenario(name, path.stem)
+    if cases:
+        return _outcome_findings(f"シナリオ「{name}」", cases, loc, "proofs.scenario")
+    if only:
+        return [
+            Finding(
+                "trace.proof_unverified",
+                Severity.ERROR,
+                f"シナリオ「{name}」の実行結果が無く、この要件を実行で裏付けるテストがありません（未証明）",
+                location=loc,
+                field="proofs.scenario",
+                actual=file,
+                suggestion="シナリオの実行結果（Karate の JUnit XML）を --test-results に渡すか、"
+                "結果を照合できる単体テストを proofs に足す。どちらもできないなら状態を implemented に戻す",
+            )
+        ]
+    return [
+        Finding(
+            "trace.proof_result_unchecked",
+            Severity.WARNING,
+            f"シナリオ「{name}」は実行結果を照合していません（存在と結果の確認の有無だけを見ています）",
+            location=loc,
+            field="proofs.scenario",
+            actual=file,
+            suggestion="シナリオの実行結果（Karate の JUnit XML）も --test-results に渡すと照合できる",
+        )
+    ]
+
+
+def _check_result(symbol: str, file: str, loc: str, st: Settings, params: tuple[str, ...] | None) -> list[Finding]:
+    """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる.
+
+    params はパラメータ化テストの引数名（パラメータ化テストでなければ None）。
+    """
     results = st.results()
     if results is None:
         return []
     owner, method = split_symbol(symbol)
-    cases = results.find(owner, method, generated, split_case(symbol)[1])
+    cases = results.find(owner, method, params, split_case(symbol)[1])
     if not cases:
         seen = results.names_in_class(owner)
         hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"
@@ -332,18 +377,24 @@ def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: boo
                 location=loc,
                 field="proofs.symbol",
                 actual=f"{file} {symbol}",
-                suggestion="テストを実行してから照合する。タグなどで除外されていないか確認する",
+                suggestion="テストを実行してから照合する。タグなどで除外されていないか確認する。"
+                "パラメータ化テストは、結果の名前が「[番号] 引数名 = 値, …」（JUnit の既定. -parameters でコンパイル）"
+                'か、メソッド名で始まる（@ParameterizedTest(name = "メソッド名 [{index}] …")）ことが要る',
             )
         ]
+    return _outcome_findings(f"テスト {symbol}", cases, loc, "proofs.symbol")
+
+
+def _outcome_findings(what: str, cases: list[Case], loc: str, fld: str) -> list[Finding]:
     failed = [c for c in cases if c.outcome == FAILED]
     if failed:
         return [
             Finding(
                 "trace.proof_failed",
                 Severity.ERROR,
-                f"テスト {symbol} が失敗しています（{len(failed)} / {len(cases)} 件）",
+                f"{what} が失敗しています（{len(failed)} / {len(cases)} 件）",
                 location=loc,
-                field="proofs.symbol",
+                field=fld,
                 actual=f"{failed[0].name}: {failed[0].message}",
                 suggestion="テストが通るように直すか、状態を implemented に戻す",
             )
@@ -353,9 +404,9 @@ def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: boo
             Finding(
                 "trace.proof_skipped",
                 Severity.ERROR,
-                f"テスト {symbol} がスキップされています（実行されていない）",
+                f"{what} がスキップされています（実行されていない）",
                 location=loc,
-                field="proofs.symbol",
+                field=fld,
                 actual=cases[0].message,
                 suggestion="スキップを外すか、状態を implemented に戻す",
             )

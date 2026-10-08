@@ -38,6 +38,93 @@ _ASSERT_NAMES = [
     r"\bt\.(?:Error|Errorf|Fatal|Fatalf|Fail|FailNow)\s*\(",
 ]
 _ASSERT_CALL = re.compile("|".join(_ASSERT_NAMES))
+
+# AssertJ・Truth の assertThat(x) は「検証の始まり」で、後ろに isEqualTo(…) などの検証の呼び出しが無いと何も確かめない。
+# assertThat… の後ろのメソッドチェーンに、次の「検証ではない」呼び出し以外が 1 つも無ければ数えない
+# （Hamcrest・JUnit の assertThat(actual, matcher) のように引数が 2 つ以上なら、それだけで検証）。
+# assertThatThrownBy(…) は、それだけで「例外が出ること」を確かめるので対象外。
+_FLUENT_START = re.compile(r"\bassertThat(?!ThrownBy\b)\w*\s*\($")
+_NOT_A_CHECK = {
+    "as",
+    "describedAs",
+    "withFailMessage",
+    "overridingErrorMessage",
+    "withRepresentation",
+    "withThreadDumpOnError",
+    "usingComparator",
+    "usingElementComparator",
+    "usingDefaultComparator",
+    "usingRecursiveComparison",
+    "usingComparatorForType",
+    "usingComparatorForFields",
+    "ignoringFields",
+    "ignoringCase",
+    "extracting",
+    "extractingResultOf",
+    "flatExtracting",
+    "asInstanceOf",
+    "asString",
+    "asList",
+    "withMessage",
+}
+
+
+def _close_paren(code: str, open_at: int) -> int:
+    """code[open_at] の ( に対応する ) の位置（無ければ -1）."""
+    depth = 0
+    for j in range(open_at, len(code)):
+        if code[j] == "(":
+            depth += 1
+        elif code[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _has_top_level_comma(args: str) -> bool:
+    depth = 0
+    for ch in args:
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return True
+    return False
+
+
+def _fluent_has_check(code: str, open_at: int) -> bool:
+    """assertThat…( の ( の位置から、引数とメソッドチェーンを読み、検証の呼び出しがあるか."""
+    close = _close_paren(code, open_at)
+    if close < 0:
+        return False
+    if _has_top_level_comma(code[open_at + 1 : close]):
+        return True  # Hamcrest / JUnit の assertThat(actual, matcher)
+    i = close + 1
+    while True:
+        m = re.match(r"\s*\.\s*(?:<[^>]*>\s*)?([A-Za-z_$][\w$]*)\s*\(", code[i:])
+        if not m:
+            return False
+        if m.group(1) not in _NOT_A_CHECK:
+            return True
+        close = _close_paren(code, i + m.end() - 1)
+        if close < 0:
+            return False
+        i = close + 1
+
+
+def count_asserts(code: str) -> int:
+    """（コメント・文字列を外した）コードのアサーションの数."""
+    n = 0
+    for m in _ASSERT_CALL.finditer(code):
+        text = m.group(0)
+        if _FLUENT_START.search(text) and not _fluent_has_check(code, m.end() - 1):
+            continue
+        n += 1
+    return n
+
+
 _CLASS_DECL = r"(?:class|interface|enum|record|object|struct|trait)"
 
 
@@ -167,37 +254,65 @@ def _generic_lookup(text: str, symbol: str) -> Lookup:
         body = _body_after(region, m.end())
         if body is None:  # 抽象メソッド・インターフェースの宣言
             return Lookup(True, -1)
-        return Lookup(True, len(_ASSERT_CALL.findall(body)))
+        return Lookup(True, count_asserts(body))
     if not owner and re.search(rf"\b{_CLASS_DECL}\s+{re.escape(name)}\b", code):
         return Lookup(True, -1)
     return Lookup(False)
 
 
 _GENERATED_TEST = re.compile(r"@(?:ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b")
+_RESOLVED_PARAM = re.compile(r"@(?:TempDir|Mock|Autowired)\b|\b(?:TestInfo|TestReporter|RepetitionInfo)\b")
 
 
-def is_generated_test(path: Path, symbol: str) -> bool:
-    """パラメータ化テストなど、1 つのメソッドが複数回実行されるテストか（JUnit 5 のアノテーションで判断）.
+def _param_names(params: str) -> tuple[str, ...]:
+    """'String line, @TempDir Path dir, Map<String, Integer> m' → ('line', 'dir', 'm')."""
+    names, depth, cur = [], 0, ""
+    for ch in params + ",":
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            cur = cur.strip()
+            if cur:
+                m = re.search(r"([A-Za-z_$][\w$]*)\s*$", cur)
+                if m:
+                    names.append((m.group(1), bool(_RESOLVED_PARAM.search(cur))))
+            cur = ""
+        else:
+            cur += ch
+    # JUnit の表示名（{argumentsWithNames}）に出るのは引数のソースから渡す引数だけ。
+    # 拡張が渡す引数（@TempDir・TestInfo など）は後ろに置く決まりなので、最初のそれより前までを使う
+    out: list[str] = []
+    for name, resolved in names:
+        if resolved:
+            break
+        out.append(name)
+    return tuple(out)
 
-    Gradle の JUnit XML では、こうしたテストの実行結果の名前が「[1] 引数…」になり、メソッド名が出ない。
-    結果と照合するときの手がかりに使う（Python の parametrize は結果の名前にメソッド名が残るので対象外）。
-    """
-    if path.suffix == ".py":
-        return False
-    code = _strip_comments_and_strings(path.read_text(encoding="utf-8", errors="replace"))
-    owner, name = split_symbol(symbol)
-    start = 0
-    if owner:
-        m = re.search(rf"\b{_CLASS_DECL}\s+{re.escape(owner)}\b", code)
-        if not m:
-            return False
-        start = m.end()
-    for m in re.finditer(rf"\b{re.escape(name)}[ \t]*\(", code[start:]):
+
+def _test_methods(code: str, start: int) -> list[tuple[str, int, bool, tuple[str, ...]]]:
+    """start 以降のメソッドの宣言 → [(名前, 位置, パラメータ化テストか, 引数名)]."""
+    out = []
+    for m in re.finditer(r"\b([A-Za-z_$][\w$]*)[ \t]*\(", code[start:]):
+        name = m.group(1)
         pos = start + m.start()
         before = code[:pos].rstrip()
         if not before or not (before[-1].isalnum() or before[-1] in "_>]"):
             continue  # 宣言ではなく呼び出し（直前が型名でない: obj.name( / = name( など）
-        if re.search(r"\b(?:return|new|throw)$", before):
+        if re.search(r"\b(?:return|new|throw|else|case)$", before) or name in {"if", "for", "while", "switch", "catch"}:
+            continue
+        # 引数の閉じかっこの後が { か throws でなければ宣言ではない
+        open_at = start + m.end() - 1
+        depth, j = 0, open_at
+        while j < len(code):
+            depth += code[j] == "("
+            depth -= code[j] == ")"
+            if depth == 0:
+                break
+            j += 1
+        after = code[j + 1 :].lstrip()
+        if not (after.startswith("{") or after.startswith("throws")):
             continue
         # メソッド名から前へ戻り、直前のメンバーの終わり（かっこの外の ; { }）までを宣言の頭（アノテーション）とみなす
         depth = 0
@@ -211,8 +326,45 @@ def is_generated_test(path: Path, symbol: str) -> bool:
             elif c in ";{}" and depth == 0:
                 break
             i -= 1
-        return bool(_GENERATED_TEST.search(code[i + 1 : pos]))
-    return False
+        generated = bool(_GENERATED_TEST.search(code[i + 1 : pos]))
+        out.append((name, pos, generated, _param_names(code[open_at + 1 : j])))
+    return out
+
+
+def _class_start(code: str, owner: str | None) -> int | None:
+    if not owner:
+        return 0
+    m = re.search(rf"\b{_CLASS_DECL}\s+{re.escape(owner)}\b", code)
+    return m.end() if m else None
+
+
+def generated_test_params(path: Path, symbol: str) -> tuple[str, ...] | None:
+    """パラメータ化テストなど、1 つのメソッドが複数回実行されるテストなら、その引数名（ソースから渡す分）. 違えば None.
+
+    Gradle の JUnit XML では、こうしたテストの実行結果の名前が「[1] 引数名 = 値, …」になり、メソッド名が出ない。
+    結果と照合するときに、引数名の並びでどのメソッドの実行分かを見分ける（Python の parametrize は結果の名前に
+    メソッド名が残るので対象外）。同じクラスに引数名の並びが同じパラメータ化テストが他にもあれば、
+    結果から見分けられないので空のタプル（＝照合に使わない）を返す。
+    """
+    if path.suffix == ".py":
+        return None
+    code = _strip_comments_and_strings(path.read_text(encoding="utf-8", errors="replace"))
+    owner, name = split_symbol(symbol)
+    start = _class_start(code, owner)
+    if start is None:
+        return None
+    methods = _test_methods(code, start)
+    mine = next((mt for mt in methods if mt[0] == name), None)
+    if mine is None or not mine[2]:
+        return None
+    if any(mt[2] and mt[0] != name and mt[3] == mine[3] for mt in methods):
+        return ()
+    return mine[3]
+
+
+def is_generated_test(path: Path, symbol: str) -> bool:
+    """パラメータ化テストなど、1 つのメソッドが複数回実行されるテストか（JUnit 5 のアノテーションで判断）."""
+    return generated_test_params(path, symbol) is not None
 
 
 def lookup_symbol(path: Path, symbol: str) -> Lookup:
