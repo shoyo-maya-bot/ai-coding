@@ -103,9 +103,7 @@ def pin_changes(before: dict[str, Pin], after: dict[str, Pin]) -> list[str]:
             else:
                 changes.append(f"{path}: 設計書（source）を変更（{old_src} → {new_src}）")
         if path not in before and new is None:
-            changes.append(
-                f"{path}: pin なしで追加（設計書の承認が記録されていません. 承認してから pin するか、承認済みならラベル）"
-            )
+            changes.append(f"{path}: pin なしで追加（設計書の承認が未記録. 承認して pin するか、承認済みならラベル）")
             continue
         if old == new:
             continue
