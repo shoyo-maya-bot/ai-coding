@@ -35,3 +35,20 @@ flowchart LR
 | escalated | 自動修正が収束せず人に戻ったか（0/1） |
 
 指摘の分類と傾向分析は quality-analytics で行えます（MUST / WANT / NITS / Q の区分を共通にしています）。
+
+## 計測の状況
+
+**まだ計測していません。** `metrics.csv` は見出しの行だけで、データはありません（`runs/`・`insights/` も空）。
+数字は実際のランの記録だけから書き、見込みや例の値で埋めないでください。
+
+## 計測の手順（1 ラン）
+
+1. ラン ID を決め、`runs/<ラン ID>/` を作って [templates/run-record.md](templates/run-record.md) を写す
+2. `git rev-parse HEAD` で guidelines/ のコミットを控える（`guideline_rev`）
+3. 5 フェーズを回す（人の実装と比べるときは、同じ設計書を人も実装し、ラン ID の `human` で同じ記録を取る）
+4. 各フェーズで、エージェントの自動修正の回数・初回に落ちたゲート・人に戻ったかを、ラン記録に書く
+5. `./scripts/verify-gates.sh --final`（Windows は `.\scripts\verify-gates.ps1 -Final`）の結果の表をラン記録に貼る
+6. 分岐網羅率は `template/build/reports/jacoco/test/html/index.html` の Branches の値（Service・Job）を書く
+7. RP2〜RP5 のレビュー指摘を MUST / WANT / NITS で数える。人が使った時間は作業ごとに分で記録して合計する
+8. 上の値を `metrics.csv` に 1 行足す（列の順は見出しのとおり。値が無い列は空にし、推測で埋めない）
+9. 差分から得た知見を `insights/` に書き、反映した guidelines/ の PR を記録する

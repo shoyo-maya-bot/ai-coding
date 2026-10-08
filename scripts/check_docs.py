@@ -5,6 +5,7 @@
 - context-sources.yaml が参照するフォルダ・テンプレートが実在する
 - YAML / JSON ファイルが構文として読める
 - Copilot のプロンプト・指示ファイルの Front Matter が読め、必須キーがある
+- Copilot のファイル（エージェント・プロンプト・指示）のコマンドに `&&` が無い（Windows PowerShell 5.1 で動かない）
 
 対象は git 管理下のファイル（git が使えないときはフォルダを走査）。
 終了コード: 0 問題なし / 1 問題あり
@@ -220,10 +221,42 @@ def check_copilot(root: Path, files: list[Path]) -> list[str]:
     return errs
 
 
+def is_copilot_file(rel: str) -> bool:
+    return rel == ".github/copilot-instructions.md" or any(("/" + rel).endswith(sfx) for sfx, _ in FRONTMATTER_RULES)
+
+
+def check_commands(root: Path, files: list[Path]) -> list[str]:
+    """エージェントが実行するコマンドに && が無いか（Windows PowerShell 5.1 は && を解釈できない）.
+
+    コード（インラインと囲み）の中だけを見る. `&&` 単独（説明のための記号）は対象外.
+    """
+    errs: list[str] = []
+    for p in files:
+        rel = p.relative_to(root).as_posix()
+        if not is_copilot_file(rel):
+            continue
+        in_fence = False
+        for no, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if FENCE.match(line):
+                in_fence = not in_fence
+                continue
+            codes = [line] if in_fence else [m.group(0).strip("`") for m in INLINE_CODE.finditer(line)]
+            if any("&&" in c and c.strip() != "&&" for c in codes):
+                errs.append(
+                    f"{rel}:{no}: コマンドに && がある（Windows PowerShell 5.1 で動かない。1 つずつ実行するか、"
+                    "Gradle は -p template で指定する）"
+                )
+    return errs
+
+
 def verify(root: Path) -> list[str]:
     files = repo_files(root)
     return (
-        check_links(root, files) + check_context_sources(root) + check_parse(root, files) + check_copilot(root, files)
+        check_links(root, files)
+        + check_context_sources(root)
+        + check_parse(root, files)
+        + check_copilot(root, files)
+        + check_commands(root, files)
     )
 
 

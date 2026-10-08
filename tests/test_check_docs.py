@@ -53,6 +53,26 @@ class CheckDocsTest(unittest.TestCase):
     def test_repository_is_consistent(self):
         self.assertEqual(check_docs.verify(ROOT), [])
 
+    def test_agent_command_with_ampersands_is_reported(self):
+        # 採点で見つかった書き方: Windows PowerShell 5.1 は && を解釈できず、エージェントの自動修正ループが最初で止まる
+        self.write(
+            ".github/agents/coder.agent.md",
+            "---\ndescription: x\n---\n\n1. `cd template && ./gradlew test` を実行する\n"
+            "2. `&&` は使えない（説明は可）\n",
+        )
+        errs = self.errors()
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("coder.agent.md:5", errs[0])
+        self.assertIn("&&", errs[0])
+
+    def test_command_with_ampersands_in_code_block_of_prompt_is_reported(self):
+        self.write(".github/prompts/run.prompt.md", "---\ndescription: x\n---\n\n```\ncd a && b\n```\n")
+        self.assertError("run.prompt.md:6", "&&")
+
+    def test_ampersands_outside_copilot_files_are_allowed(self):
+        self.write("docs/bash.md", "# bash\n\n```bash\ncd a && b\n```\n")
+        self.assertEqual(self.errors(), [])
+
     def test_missing_link_target(self):
         self.write("README.md", "[なし](docs/none.md)\n")
         self.assertError("README.md:1", "リンク先がない", "docs/none.md")

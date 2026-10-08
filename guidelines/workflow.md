@@ -21,7 +21,7 @@ flowchart TD
 | フェーズ | 担当エージェント | 入力 | 出力 | 終わりの条件 |
 |---|---|---|---|---|
 | 1 計画 | planner | 設計書（ID で特定） | 生成ファイル一覧、`traceability/specs/<機能>.yaml`（全要件 pending） | 人が RP1 で承認し、`spec-trace pin` を実行 |
-| 2 コード生成 | coder | 計画、guidelines | ソース一式。対応表の implements を書き implemented に | `./gradlew qualityGate` の D1・D2・D5・D9 が通る、RP2 承認 |
+| 2 コード生成 | coder | 計画、guidelines | ソース一式。対応表の implements を書き implemented に | `qualityGate`（`./template/gradlew -p template qualityGate`）の D1・D2・D5・D9 が通る、RP2 承認 |
 | 3 テスト生成 | tester | ソース、設計書 | 単体テスト、Karate シナリオ。proofs を書き proven に | D3・D4・D6〜D8・D10 が通る、RP3 承認 |
 | 4 突合 | reviewer | 設計書、ソース、テスト | 非決定論ゲート N1〜N6 の判定表 | 指摘 0 または全件を人が判断、RP4 承認 |
 | 5 CI + PR | orchestrator | 全成果物 | PR（判定表・ゲート結果を本文に添付） | CI が全て通る、RP5 承認 |
@@ -49,6 +49,16 @@ flowchart TD
 - カバレッジの閾値（`branchCoverageMinimum`）を下げる
 
 直せないときは、理由と試したことを添えて人に相談します。
+
+「理由なく」とは、除外の設定（`config/spotbugs/exclude.xml` など）やアノテーションの横に、なぜ除外するのかを書いていないことです。
+理由を書いた除外も、RP2・RP3 のレビューで人が採否を決めます。
+
+## 人だけが行うこと
+
+次の操作は人が行います。エージェントは、人の承認を得た後でも実行しません（必要になったら人に依頼します）。
+
+- `spec-trace pin`（承認した設計書のハッシュの記録）
+- `git push`・PR の作成・マージ
 
 ## 設計書の変更（ドリフト）
 

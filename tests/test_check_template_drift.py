@@ -1,6 +1,8 @@
 """scripts/check_template_drift.py のテスト（仮の写し元と template を作ってずらし、検知できるか）."""
 
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,7 +66,15 @@ class TemplateDriftTest(unittest.TestCase):
         self.write(self.tpl, "UPSTREAM.yaml", CONFIG)
 
     def tearDown(self):
-        shutil.rmtree(self.tmp)
+        # Windows では git のオブジェクトが読み取り専用で、そのままでは消せない. 書き込み可にしてから消す
+        def make_writable(func, path, _exc):
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(self.tmp, onexc=make_writable)
+        else:
+            shutil.rmtree(self.tmp, onerror=make_writable)
 
     def write(self, base, rel, text):
         p = base / rel

@@ -240,7 +240,8 @@ def first_diff(a: str, b: str) -> str:
 
 
 def fetch_upstream(repo: str, ref: str, dest: Path) -> None:
-    url = repo if "://" in repo or repo.startswith("/") else f"https://github.com/{repo}.git"
+    # 手元のリポジトリ（絶対パス。Windows の C:/... を含む）はそのまま、owner/name は GitHub の URL にする
+    url = repo if "://" in repo or Path(repo).is_absolute() else f"https://github.com/{repo}.git"
     subprocess.run(["git", "init", "-q", str(dest)], check=True)
     subprocess.run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1", url, ref], check=True)
     subprocess.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"], check=True)

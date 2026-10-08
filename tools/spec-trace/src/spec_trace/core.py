@@ -23,7 +23,8 @@ from devtools_common.config import load_structured
 from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
-from .code import lookup_scenario, lookup_symbol
+from .code import is_generated_test, lookup_scenario, lookup_symbol, split_symbol
+from .results import FAILED, SKIPPED, TestResults, load_results
 
 log = get_logger(__name__)
 
@@ -36,6 +37,13 @@ class Settings:
     min_asserts: int = 1
     require: str | None = None  # 全要件にこの状態以上を求める（implemented / proven）
     enforce_drift: bool = False  # 設計書が見つからない場合もエラーにする
+    test_results: list[Path] = field(default_factory=list)  # JUnit 形式の結果。指定すると「実行されて成功」も求める
+    _results: TestResults | None = None
+
+    def results(self) -> TestResults | None:
+        if self.test_results and self._results is None:
+            self._results = load_results(self.test_results)
+        return self._results
 
 
 @dataclass
@@ -248,6 +256,18 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                         actual=str(sc.checks),
                     )
                 )
+            elif st.results() is not None:
+                out.append(
+                    Finding(
+                        "trace.proof_result_unchecked",
+                        Severity.WARNING,
+                        f"シナリオ「{name}」は実行結果を照合していません（存在と結果の確認の有無だけを見ています）",
+                        location=loc,
+                        field="proofs.scenario",
+                        actual=it["file"],
+                        suggestion="シナリオの実行結果（Karate の JUnit XML）も --test-results に渡すと照合できる",
+                    )
+                )
             continue
         symbol = it.get("symbol")
         if not symbol:
@@ -277,7 +297,58 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                     suggestion="結果を確かめるアサーションを書く（実行するだけのテストは裏付けにならない）",
                 )
             )
+        elif st.results() is not None:
+            out += _check_result(symbol, it["file"], loc, st, is_generated_test(path, symbol))
     return out
+
+
+def _check_result(symbol: str, file: str, loc: str, st: Settings, generated: bool) -> list[Finding]:
+    """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる."""
+    results = st.results()
+    if results is None:
+        return []
+    owner, method = split_symbol(symbol)
+    cases = results.find(owner, method, generated)
+    if not cases:
+        seen = results.names_in_class(owner)
+        hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"
+        return [
+            Finding(
+                "trace.proof_not_run",
+                Severity.ERROR,
+                f"テスト {symbol} の実行結果がありません（実行されていない）{hint}",
+                location=loc,
+                field="proofs.symbol",
+                actual=f"{file} {symbol}",
+                suggestion="テストを実行してから照合する。タグなどで除外されていないか確認する",
+            )
+        ]
+    failed = [c for c in cases if c.outcome == FAILED]
+    if failed:
+        return [
+            Finding(
+                "trace.proof_failed",
+                Severity.ERROR,
+                f"テスト {symbol} が失敗しています（{len(failed)} / {len(cases)} 件）",
+                location=loc,
+                field="proofs.symbol",
+                actual=f"{failed[0].name}: {failed[0].message}",
+                suggestion="テストが通るように直すか、状態を implemented に戻す",
+            )
+        ]
+    if all(c.outcome == SKIPPED for c in cases):
+        return [
+            Finding(
+                "trace.proof_skipped",
+                Severity.ERROR,
+                f"テスト {symbol} がスキップされています（実行されていない）",
+                location=loc,
+                field="proofs.symbol",
+                actual=cases[0].message,
+                suggestion="スキップを外すか、状態を implemented に戻す",
+            )
+        ]
+    return []
 
 
 def check_spec(path: Path, st: Settings, summary: Summary, seen_ids: dict[str, str]) -> list[Finding]:
