@@ -4,7 +4,10 @@
 `spec-trace pin` は人が設計書を承認したときに実行する操作（guidelines/workflow.md の「人だけが行うこと」）。
 エージェントや PR の作成者が pin を書き換えて trace.spec_drift を黙らせることを防ぐため、
 PR の変更前（base）と変更後（作業ツリー）の traceability/specs を比べ、source_sha256 が変わった・増えた・消えた
-対応表があれば、PR に `spec-pin-approved` ラベルが付いていることを求める（ラベルは設計書を承認した人が付ける）。
+対応表、または pin の対象の設計書（トップレベルの source:）を消した・差し替えた対応表があれば、
+PR に `spec-pin-approved` ラベルが付いていることを求める（ラベルは設計書を承認した人が付ける）。
+source を消すと spec-trace はドリフトを検知できなくなり、別の設計書に差し替えると pin の意味が変わるため、
+pin と同じ扱いにする。
 
 ラベルは GitHub が渡す PR のイベント（GITHUB_EVENT_PATH の pull_request.labels）から読む。API は呼ばない。
 ラベルを付け外しすると `pull_request` の labeled / unlabeled で再実行され、結果が更新される。
@@ -43,20 +46,23 @@ def _git(*args: str, cwd: Path) -> str:
     return res.stdout
 
 
-def _pin_of(text: str, name: str) -> str | None:
+Pin = tuple[str | None, str | None]  # (source = 設計書のパス, source_sha256)
+
+
+def _pin_of(text: str, name: str) -> Pin:
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as e:
         raise InputError(f"{name} を YAML として読めません: {e}") from None
     if not isinstance(data, dict):
-        return None
-    pin = data.get("source_sha256")
-    return str(pin) if pin is not None else None
+        return (None, None)
+    source, pin = data.get("source"), data.get("source_sha256")
+    return (str(source) if source else None, str(pin) if pin is not None else None)
 
 
-def pins_at_base(base: str, specs: str, cwd: Path) -> dict[str, str | None]:
-    """base のコミットにある対応表ごとの source_sha256（無ければ None）."""
-    out: dict[str, str | None] = {}
+def pins_at_base(base: str, specs: str, cwd: Path) -> dict[str, Pin]:
+    """base のコミットにある対応表ごとの (source, source_sha256)（無ければ None）."""
+    out: dict[str, Pin] = {}
     listing = _git("ls-tree", "-r", "--name-only", base, "--", specs, cwd=cwd)
     for path in listing.splitlines():
         if path.endswith(SUFFIXES):
@@ -64,9 +70,9 @@ def pins_at_base(base: str, specs: str, cwd: Path) -> dict[str, str | None]:
     return out
 
 
-def pins_in_tree(specs: str, cwd: Path) -> dict[str, str | None]:
-    """作業ツリー（PR の変更後）の対応表ごとの source_sha256."""
-    out: dict[str, str | None] = {}
+def pins_in_tree(specs: str, cwd: Path) -> dict[str, Pin]:
+    """作業ツリー（PR の変更後）の対応表ごとの (source, source_sha256)."""
+    out: dict[str, Pin] = {}
     root = cwd / specs
     if not root.is_dir():
         return out
@@ -77,14 +83,23 @@ def pins_in_tree(specs: str, cwd: Path) -> dict[str, str | None]:
     return out
 
 
-def pin_changes(before: dict[str, str | None], after: dict[str, str | None]) -> list[str]:
-    """pin が変わった対応表の説明（変わっていなければ空）.
+def pin_changes(before: dict[str, Pin], after: dict[str, Pin]) -> list[str]:
+    """pin（と pin の対象の設計書 source）が変わった対応表の説明（変わっていなければ空）.
 
     新しい対応表に pin がある・pin のある対応表を消した、も変更とみなす。
+    source の行を消した・別の設計書に差し替えた、も変更とみなす（ドリフトの検知が外れる・pin の意味が変わる）。
     """
     changes = []
     for path in sorted(set(before) | set(after)):
-        old, new = before.get(path), after.get(path)
+        old_src, old = before.get(path, (None, None))
+        new_src, new = after.get(path, (None, None))
+        if path in before and path in after and old_src != new_src:
+            if new_src is None:
+                changes.append(f"{path}: 設計書（source）を削除（{old_src}）. ドリフトを検知できなくなります")
+            elif old_src is None:
+                changes.append(f"{path}: 設計書（source）を記録（{new_src}）")
+            else:
+                changes.append(f"{path}: 設計書（source）を変更（{old_src} → {new_src}）")
         if old == new:
             continue
         if path not in before:

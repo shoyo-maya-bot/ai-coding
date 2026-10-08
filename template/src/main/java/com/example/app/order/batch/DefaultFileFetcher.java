@@ -3,6 +3,9 @@ package com.example.app.order.batch;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +22,9 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
  *
  * <p>ファイル全体をメモリに読むので、大きさに上限を設ける（{@code app.batch.max-input-bytes}。既定 64 MiB）。
  * 上限を超えたら読まずに {@link IOException} にする（JOB0001 は終了コード 8）。
+ *
+ * <p>文字コードは UTF-8。ローカルでも S3 でも、UTF-8 として正しくないバイト列があれば置き換えずに
+ * {@link CharacterCodingException}（{@link IOException} の一種）にする（JOB0001 は終了コード 8）。
  */
 @Component
 public final class DefaultFileFetcher implements FileFetcher {
@@ -70,10 +76,42 @@ public final class DefaultFileFetcher implements FileFetcher {
                 in.abort();
                 checkSize(bytes.length, location);
             }
-            String text = new String(bytes, StandardCharsets.UTF_8);
-            try (BufferedReader reader = new BufferedReader(new StringReader(text))) {
+            try (BufferedReader reader = new BufferedReader(new StringReader(decodeUtf8(bytes, location)))) {
                 return reader.lines().toList();
             }
+        }
+    }
+
+    /**
+     * UTF-8 として厳密に読む（new String(bytes, UTF_8) と違い、不正なバイト列を U+FFFD に置き換えない）.
+     * ローカルの {@link Files#readAllLines(Path, java.nio.charset.Charset)} と同じく
+     * {@link java.nio.charset.MalformedInputException} 等にする.
+     */
+    static String decodeUtf8(byte[] bytes, String location) throws CharacterCodingException {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            throw new InvalidUtf8Exception(location, e);
+        }
+    }
+
+    /** 入力が UTF-8 として正しくない（場所をメッセージに入れる）. */
+    static final class InvalidUtf8Exception extends CharacterCodingException {
+        private static final long serialVersionUID = 1L;
+        private final String message;
+
+        InvalidUtf8Exception(String location, CharacterCodingException cause) {
+            this.message = "入力ファイルが UTF-8 として正しくありません（" + cause + "）: " + location;
+            initCause(cause);
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
         }
     }
 

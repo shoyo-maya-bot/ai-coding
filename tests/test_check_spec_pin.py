@@ -118,6 +118,20 @@ class SpecPinTest(unittest.TestCase):
         rc, out = self.run_main("--base", self.base, "--event", str(p))
         self.assertEqual(rc, 2, out)
 
+    def test_removed_source_line_needs_label(self):
+        # source の行だけを消すと spec-trace のドリフト検知が外れるので、pin の変更と同じくラベルを求める
+        self.write("traceability/specs/x.yaml", SPEC.format(A).replace('source: "docs/x.md"\n', ""))
+        rc, out = self.run_main("--event", self.event([]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("x.yaml: 設計書（source）を削除（docs/x.md）", out)
+        self.assertEqual(self.run_main("--event", self.event(["spec-pin-approved"]))[0], 0)
+
+    def test_replaced_source_needs_label(self):
+        self.write("traceability/specs/x.yaml", SPEC.format(A).replace("docs/x.md", "docs/other.md"))
+        rc, out = self.run_main("--event", self.event([]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("x.yaml: 設計書（source）を変更（docs/x.md → docs/other.md）", out)
+
     def test_broken_yaml_is_usage_error(self):
         self.write("traceability/specs/x.yaml", "source_sha256: [\n")
         rc, out = self.run_main("--event", self.event([]))
@@ -156,7 +170,8 @@ class RepoPinsTest(unittest.TestCase):
     def test_current_specs_are_readable(self):
         pins = pin.pins_in_tree(pin.SPECS, ROOT)
         self.assertTrue(pins)
-        self.assertTrue(all(v is None or len(v) == 64 for v in pins.values()))
+        self.assertTrue(all(sha is None or len(sha) == 64 for _, sha in pins.values()))
+        self.assertTrue(all(src for src, _ in pins.values()))  # どの対応表にも設計書（source）がある
 
 
 if __name__ == "__main__":

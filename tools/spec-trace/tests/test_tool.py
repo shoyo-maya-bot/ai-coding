@@ -310,10 +310,6 @@ class CodeLookupTest(unittest.TestCase):
         self.assertEqual(lookup_scenario(p, "正常").checks, 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 JUNIT_OK = """<?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="com.example.batch.order.OrderImportJobTest" tests="2" failures="0" errors="0" skipped="0">
   <testcase name="importOrders_skipsExisting()" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>
@@ -328,22 +324,32 @@ PYTEST_OK = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
+# Karate の JUnit XML（classname は Feature のパッケージ付きの名前、name は「[行:行] シナリオ名」）
+KARATE_OK = """<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="e2e/order-import.feature" tests="1" failures="0" skipped="0">
+  <testcase classname="e2e.order-import" name="[1:3] 結果ファイルに件数が出る" time="0.2"/>
+</testsuite>
+"""
+
+
 class TestResultsTest(Base):
     """--test-results: proven の裏付けに「テストが実行されて成功した」ことも求める."""
 
-    def results(self, junit: str = JUNIT_OK, pytest: str = PYTEST_OK) -> Path:
+    def results(self, junit: str = JUNIT_OK, pytest: str = PYTEST_OK, karate: str | None = KARATE_OK) -> Path:
         d = self.tmp / "results"
         (d / "test").mkdir(parents=True, exist_ok=True)
         (d / "test" / "TEST-com.example.batch.order.OrderImportJobTest.xml").write_text(junit, encoding="utf-8")
         (d / "pytest.xml").write_text(pytest, encoding="utf-8")
+        k = d / "karate.xml"
+        if karate is None:
+            k.unlink(missing_ok=True)
+        else:
+            k.write_text(karate, encoding="utf-8")
         return d
 
     def test_all_passed(self):
         rc, data = self.check("--require", "proven", "--test-results", str(self.results()))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
-        warn = [f for f in data["findings"] if f["rule_id"] == "trace.proof_result_unchecked"][0]
-        self.assertEqual(warn["severity"], "warning")
-        self.assertIn("REQ-ORDER-003", warn["location"])
+        self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_assertion_exists_but_test_failed(self):
         # 採点で見つかった穴: アサーションがあれば proven になり、テストが落ちていても気づけない
@@ -385,7 +391,7 @@ class TestResultsTest(Base):
     def test_parameterized_invocations_all_passed(self):
         self.use_parameterized_test()
         rc, data = self.check("--test-results", str(self.results()))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_one_failed_invocation_fails(self):
         junit = JUNIT_OK.replace(
@@ -417,7 +423,7 @@ class TestResultsTest(Base):
             '    @ParameterizedTest\n    @CsvSource({"a, b", "c"})\n    void other(String s)',
         )
         rc, data = self.check("--test-results", str(self.results(junit=self.gradle9_parameterized(""))))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
         failed = self.gradle9_parameterized('<failure message="boom"/>')
         rc, data = self.check("--test-results", str(self.results(junit=failed)))
         self.assertEqual(rc, 1)
@@ -457,7 +463,7 @@ class TestResultsTest(Base):
 
     def test_pytest_parametrize_all_passed(self):
         rc, data = self.check("--test-results", str(self.results(pytest=self.pytest_param("case1", "a.b::c-1"))))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_pytest_parametrize_one_failed(self):
         junit = self.pytest_param("case1", 'case2|<failure message="boom"/>')
@@ -473,7 +479,7 @@ class TestResultsTest(Base):
         spec = "traceability/order-import.yaml"
         self.edit(spec, 'symbol: "test_import_is_idempotent"', 'symbol: "test_import_is_idempotent[case1]"')
         rc, data = self.check("--test-results", str(self.results(pytest=junit)))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
         # 失敗した id を指すと失敗、結果に無い id は実行されていない扱い
         self.edit(spec, 'symbol: "test_import_is_idempotent[case1]"', 'symbol: "test_import_is_idempotent[case2]"')
         rc, data = self.check("--test-results", str(self.results(pytest=junit)))
@@ -500,7 +506,7 @@ class TestResultsTest(Base):
             '<failure message="other class"/></testcase></testsuite>',
         )
         rc, data = self.check("--test-results", str(self.results(pytest=junit)))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_java_parameterized_case_id(self):
         self.use_parameterized_test()
@@ -512,7 +518,7 @@ class TestResultsTest(Base):
             '<testcase name="other(String)[2]" classname="com.example.batch.order.OrderImportJobTest"/>',
         )
         rc, data = self.check("--test-results", str(self.results(junit=junit)))
-        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_results_dir_without_xml_is_usage_error(self):
         empty = self.tmp / "empty"
@@ -531,3 +537,237 @@ class TestResultsTest(Base):
     def test_without_option_behaves_as_before(self):
         rc, data = self.check("--require", "proven")
         self.assertEqual((rc, self.rules(data)), (0, []))
+
+
+# --- 対応表の source（根拠の設計書）は必須 ---
+
+
+class SourceRequiredTest(Base):
+    def drop_source(self) -> None:
+        p = self.proj / SPEC
+        lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+        p.write_text("".join(ln for ln in lines if not ln.startswith(("source:", "source_sha256:"))), encoding="utf-8")
+
+    def test_spec_without_source_is_rejected_by_schema(self):
+        self.drop_source()
+        rc, _, err = run_cli("check", str(self.proj / "traceability"), "--root", str(self.proj), "--enforce-drift")
+        self.assertEqual(rc, 2)
+        self.assertIn("source", err)
+        self.assertIn("形式が不正", err)
+
+    def test_empty_source_is_rejected_by_schema(self):
+        self.edit(SPEC, 'source: "docs/design/order-import.md"', 'source: ""')
+        rc, _, err = run_cli("check", str(self.proj / "traceability"), "--root", str(self.proj))
+        self.assertEqual(rc, 2)
+
+    def test_missing_source_is_error_with_enforce_drift_even_without_schema(self):
+        from spec_trace.core import Settings, _check_drift
+
+        spec = {"spec_id": "X", "requirements": []}
+        found = _check_drift(spec, "x.yaml", Settings(root=self.proj, enforce_drift=True))
+        self.assertEqual([(f.rule_id, f.severity.value) for f in found], [("trace.source_unspecified", "error")])
+        found = _check_drift(spec, "x.yaml", Settings(root=self.proj))
+        self.assertEqual([(f.rule_id, f.severity.value) for f in found], [("trace.source_unspecified", "warning")])
+
+
+# --- パラメータ化テストの結果は、メソッドごとに厳密に対応づける ---
+
+TWO_PARAMETERIZED = """class PTest {
+    @ParameterizedTest
+    @CsvSource({"a, b", "c, d"})
+    void parseRejects(String line, String message) {
+        assertThat(line).isNotNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"s3://", "s3://b"})
+    void rejectsMalformed(String location) {
+        assertThat(location).isNotEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"x"})
+    void withTempDir(String name, @TempDir Path dir) {
+        assertThat(dir).exists();
+    }
+}
+"""
+
+
+def junit(*cases: tuple[str, str]) -> str:
+    rows = "".join(f'<testcase name="{name}" classname="com.example.PTest">{body}</testcase>' for name, body in cases)
+    return f'<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.example.PTest">{rows}</testsuite>'
+
+
+class ParameterizedMatchingTest(Base):
+    def setUp(self):
+        super().setUp()
+        (self.proj / "java/test/PTest.java").write_text(TWO_PARAMETERIZED, encoding="utf-8")
+        self.edit(SPEC, "java/test/OrderImportJobTest.java", "java/test/PTest.java")
+        self.edit(SPEC, "OrderImportJobTest#importOrders_skipsExisting", "PTest#parseRejects")
+
+    def run_with(self, xml: str) -> tuple[int, dict]:
+        d = self.tmp / "res"
+        d.mkdir(exist_ok=True)
+        (d / "TEST-com.example.PTest.xml").write_text(xml, encoding="utf-8")
+        (d / "pytest.xml").write_text(PYTEST_OK, encoding="utf-8")
+        (d / "karate.xml").write_text(KARATE_OK, encoding="utf-8")
+        return self.check("--test-results", str(d))
+
+    def test_other_methods_success_is_not_counted(self):
+        # parseRejects は実行されていない（結果は rejectsMalformed の分だけ）.
+        # 前は同じクラスの [n] を全部数えて成功にしていた
+        xml = junit(("[1] location = &quot;s3://&quot;", ""), ("[2] location = &quot;s3://b&quot;", ""))
+        rc, data = self.run_with(xml)
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_other_methods_failure_does_not_fail_this_one(self):
+        xml = junit(
+            ("[1] line = &quot;a&quot;, message = &quot;b&quot;", ""),
+            ("[2] line = &quot;c&quot;, message = &quot;d&quot;", ""),
+            ("[1] location = &quot;s3://&quot;", '<failure message="boom"/>'),
+        )
+        rc, data = self.run_with(xml)
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_own_failure_is_reported(self):
+        xml = junit(
+            ("[1] line = &quot;a&quot;, message = &quot;b&quot;", ""),
+            ("[2] line = &quot;c, message = x&quot;, message = &quot;d&quot;", '<failure message="boom"/>'),
+            ("[1] location = &quot;s3://&quot;", ""),
+        )
+        rc, data = self.run_with(xml)
+        self.assertEqual(rc, 1)
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_failed"][0]
+        self.assertIn("1 / 2", f["message"])
+
+    def test_results_without_argument_names_are_not_guessed(self):
+        # 引数名の無い表示名（-parameters なし・name を独自に付けた）は、どのメソッドの分か分からないので数えない
+        xml = junit(("[1] a, b", ""), ("[2] c, d", ""))
+        rc, data = self.run_with(xml)
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_display_name_with_method_name_is_matched(self):
+        xml = junit(("parseRejects(String, String)[1]", ""), ("parseRejects(String, String)[2]", ""))
+        rc, data = self.run_with(xml)
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_extension_resolved_parameters_are_not_in_display_name(self):
+        from spec_trace.code import generated_test_params
+
+        p = self.proj / "java/test/PTest.java"
+        self.assertEqual(generated_test_params(p, "PTest#parseRejects"), ("line", "message"))
+        self.assertEqual(generated_test_params(p, "PTest#rejectsMalformed"), ("location",))
+        self.assertEqual(generated_test_params(p, "PTest#withTempDir"), ("name",))
+
+    def test_same_argument_names_in_two_methods_cannot_be_told_apart(self):
+        from spec_trace.code import generated_test_params
+
+        p = self.proj / "java/test/PTest.java"
+        p.write_text(
+            TWO_PARAMETERIZED.replace(
+                "void rejectsMalformed(String location)", "void rejectsMalformed(String line, String message)"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(generated_test_params(p, "PTest#parseRejects"), ())
+        xml = junit(("[1] line = &quot;a&quot;, message = &quot;b&quot;", ""))
+        rc, data = self.run_with(xml)
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_invocation_params(self):
+        from spec_trace.results import invocation_params
+
+        name = '[1] line = "A001,1,P-01", message = "列数が 4 ではありません（3 列）"'
+        self.assertEqual(invocation_params(name), ("line", "message"))
+        self.assertEqual(invocation_params('[3] s = "a, b = c", n = 3'), ("s", "n"))
+        self.assertEqual(invocation_params("[2] n = 3, flag = true"), ("n", "flag"))
+        self.assertIsNone(invocation_params("[1] a, b"))
+        self.assertIsNone(invocation_params("parseRejects(String)[1]"))
+
+
+# --- Karate のシナリオだけの proof は、実行結果を照合できるときだけ proven ---
+
+
+class ScenarioOnlyProofTest(Base):
+    results = TestResultsTest.results
+
+    def test_scenario_only_without_result_is_unproven(self):
+        rc, data = self.check("--test-results", str(self.results(karate=None)))
+        self.assertEqual(rc, 1)
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_unverified"][0]
+        self.assertEqual(f["severity"], "error")
+        self.assertIn("REQ-ORDER-003", f["location"])
+
+    def test_scenario_only_with_passed_result_is_proven(self):
+        rc, data = self.check("--require", "proven", "--test-results", str(self.results()))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_scenario_failed_or_skipped(self):
+        failed = KARATE_OK.replace('time="0.2"/>', 'time="0.2"><failure message="status 500"/></testcase>')
+        rc, data = self.check("--test-results", str(self.results(karate=failed)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_failed", self.rules(data))
+        skipped = KARATE_OK.replace('time="0.2"/>', 'time="0.2"><skipped/></testcase>')
+        rc, data = self.check("--test-results", str(self.results(karate=skipped)))
+        self.assertIn("trace.proof_skipped", self.rules(data))
+
+    def test_scenario_with_unit_test_alongside_stays_a_warning(self):
+        # 単体テストでも裏付けている要件は、シナリオの結果が無くても警告だけ（単体テストの結果で proven）
+        self.edit(
+            SPEC,
+            '      - file: "e2e/order-import.feature"\n',
+            '      - file: "tests/test_order_import.py"\n        symbol: "test_import_is_idempotent"\n'
+            '      - file: "e2e/order-import.feature"\n',
+        )
+        rc, data = self.check("--test-results", str(self.results(karate=None)))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+
+    def test_without_test_results_scenario_is_checked_statically_as_before(self):
+        rc, data = self.check("--require", "proven")
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+
+# --- AssertJ の assertThat(x) だけ（終端の検証が無い）はアサーションに数えない ---
+
+
+class FluentAssertionTest(unittest.TestCase):
+    write = CodeLookupTest.write
+
+    def count(self, line: str) -> int:
+        p = self.write("A.java", "class A {\n  @Test\n  void t() {\n    " + line + "\n  }\n}\n")
+        return lookup_symbol(p, "A#t").asserts
+
+    def test_assert_that_without_check_is_not_counted(self):
+        self.assertEqual(self.count("assertThat(result);"), 0)
+        self.assertEqual(self.count('assertThat(result).as("説明");'), 0)
+        self.assertEqual(self.count('assertThat(result).describedAs("x").withFailMessage("y");'), 0)
+        self.assertEqual(self.count("assertThat(list).extracting(Order::no);"), 0)
+        self.assertEqual(self.count("assertThatList(list);"), 0)
+
+    def test_assert_that_with_check_is_counted(self):
+        self.assertEqual(self.count("assertThat(result).isEqualTo(1);"), 1)
+        self.assertEqual(self.count('assertThat(r).as("x").isTrue();'), 1)
+        self.assertEqual(self.count('assertThat(list).extracting(Order::no).containsExactly("A");'), 1)
+        self.assertEqual(self.count("assertThat(r)\n        .isNotNull();"), 1)
+        self.assertEqual(self.count("Assertions.assertThat(f(g(1))).isPositive();"), 1)
+        self.assertEqual(self.count("assertThat(a, is(1));"), 1)  # Hamcrest は引数 2 つで検証
+        self.assertEqual(self.count("assertThatThrownBy(() -> f());"), 1)  # 例外が出ることの検証
+
+    def test_mixed(self):
+        self.assertEqual(self.count("assertThat(a);\n    assertThat(b).isNull();"), 1)
+
+    def test_sample_java_test_without_terminal_check_is_no_assert(self):
+        p = self.write(
+            "OrderImportJobTest.java",
+            "class OrderImportJobTest {\n  @Test\n  void importOrders_skipsExisting() {\n"
+            "    assertThat(job.importOrders(orders));\n  }\n}\n",
+        )
+        self.assertEqual(lookup_symbol(p, "OrderImportJobTest#importOrders_skipsExisting").asserts, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

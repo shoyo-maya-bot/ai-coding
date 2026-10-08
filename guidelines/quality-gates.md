@@ -32,6 +32,8 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある | `scripts/verify_authority.py` |
 
 D10 の Karate シナリオは、起動中のアプリと DB が要るので、この CI では実行しません（`spec-trace` は `trace.proof_result_unchecked` の警告で知らせます）。
+そのため、シナリオ**だけ**で裏付けている要件は `--test-results` で未証明（`trace.proof_unverified`）になります。単体テストも proofs に書いてください
+（Karate の JUnit XML を `--test-results` に渡せば、シナリオの結果も照合します）。
 実際に API を呼んで通ることは、dev-environment の CI（e2e ジョブ）と、RP3 のレビューで手元の `karateTest` の結果を見て確かめます。
 
 CI でマージ前に必須とするのは D1〜D11 全部です。要件の状態は、PR では `--require implemented`（途中段階でも全要件が実装済み）、

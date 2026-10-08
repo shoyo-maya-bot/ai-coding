@@ -57,11 +57,12 @@ AI は次のどれかで自動修正をやめ、各回の修正内容・エラ�
 | 次にやること | ツール |
 |---|---|
 | レビューの指摘（RP1〜RP5・PR）の傾向を見て、ルールを育てる | quality-analytics（`qa collect` → `qa classify` → `qa analyze`） |
-| AI 生成と人の実装を比べて、プロンプトと guidelines を直す | [eval/](eval/README.md) の評価ループ |
+| AI 生成と人の実装を比べて、プロンプトと guidelines を直す | [eval/](eval/README.md) の評価ループ。機能を 1 つ作るたびにラン記録を書き、`eval/metrics.csv` に 1 行足す（書き方と架空の例は [eval/README.md の「最初の記録の例」](eval/README.md#最初の記録の例架空)） |
 | 設計書の改訂を追う | design-diff（Excel の新旧差分）→ このページの「いつ使うか」の 2 行目へ |
 
 ## 守ること
 
 - **AI の生成物は β 版**。人の全量レビュー（RP1〜RP5）を前提にする
 - `spec-trace pin`、PR のマージは **人が** 行う
+- AI の利用は上限の中で行う（費用・リクエスト数。[guidelines/ai-principles.md の「AI 利用の上限」](guidelines/ai-principles.md#ai-利用の上限)）
 - 業務の設計書を AI に渡してよい範囲は、社内の規程と Copilot の契約で確かめる

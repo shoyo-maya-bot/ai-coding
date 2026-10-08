@@ -4,11 +4,11 @@
   "title": "spec-trace トレーサビリティ定義（1 機能 = 1 ファイル）",
   "type": "object",
   "additionalProperties": false,
-  "required": ["spec_id", "requirements"],
+  "required": ["spec_id", "source", "requirements"],
   "properties": {
     "spec_id": {"type": "string", "minLength": 1, "description": "機能・ジョブ・API の識別子（例: FEAT-ORDER-IMPORT）"},
     "title": {"type": "string"},
-    "source": {"type": "string", "description": "根拠の設計書（--root からの相対パス）"},
+    "source": {"type": "string", "minLength": 1, "description": "根拠の設計書（--root からの相対パス）。必須（無いとドリフトを検知できない）"},
     "source_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
