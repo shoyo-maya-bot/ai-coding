@@ -9,7 +9,7 @@
 #   3. 下の sha を写し元の main のコミットに更新し、もう一度 python scripts/check_template_drift.py が通ることを確かめる
 # このため .github/dependabot.yml の template の gradle は、写し元と揃える依存（keep_in_sync の対象）を ignore にしている。
 repo: shoyo-maya-bot/dev-environment
-sha: 49d093f0a2b1604de223ebe80d9d62ad7523e6a4
+sha: f497a2c875793e4bbacba0252c043bc34a852e02
 
 # 写し元のディレクトリ → template 内のディレクトリ
 mappings:
@@ -64,6 +64,13 @@ allowed_differences:
       Compose のプロジェクト名を変え、dev-environment のサンプルとコンテナ名・ボリューム名（DB のデータ）が混ざらないようにしている。
       ホスト側のポート（DB 5432・S3 エミュレータ 9090）は同じなので、そのままでは同時に起動できない
       （同時に使うときは、片方の local/.env で DB_PORT・S3_PORT を変え、アプリの接続先も環境変数で合わせる）
+  - path: local/.env.example
+    kind: replace
+    replace:
+      - from: （local/README.md の「ポート・パスワードを変えたとき」）
+        to: （dev-environment の local/README.md の「ポート・パスワードを変えたとき」）
+    reason: >-
+      template には local/README.md を持ち込まない（下の removed）ので、案内先を dev-environment の手順書と明記している
   - path: src/main/java/com/example/app/AppApplication.java
     kind: replace
     replace:
