@@ -15,7 +15,7 @@
 
 ```yaml
 spec_id: "FEAT-JOB0001"
-source: "samples/design-docs/batch/JOB0001_order-import.md"
+source: "samples/design-docs/batch/JOB0001_order-import.md"   # 必須（無いとドリフトを検知できない。消すと spec-pin がラベルを求める）
 source_sha256: "..."            # 人が承認後に spec-trace pin で記録
 requirements:
   - id: "REQ-JOB0001-003"        # REQ-<機能 ID>-<連番 3 桁>
@@ -37,7 +37,7 @@ requirements:
 |---|---|---|
 | pending | planner | なし |
 | implemented | coder | implements のファイルと関数が実在する |
-| proven | tester | proofs のテストが実在し、アサーションがある（シナリオは有効で Then / match がある） |
+| proven | tester | proofs のテストが実在し、アサーションがある（シナリオは有効で Then / match がある）。`--test-results` では実行されて成功していること（シナリオだけで裏付ける要件は、シナリオの実行結果があること） |
 
 状態を上げるのはエージェントでもよいですが、条件を満たさなければ CI が失敗します。状態を下げる（実装を消した等）のも同じ PR で行います。
 

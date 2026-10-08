@@ -7,6 +7,7 @@
 | guidelines のコミット | <SHA> |
 | 実施者 | <担当> |
 | 実施日 | YYYY-MM-DD |
+| AI のリクエスト数 | <Copilot の利用状況で見た、このランで使ったプレミアムリクエストの数>（上限は guidelines/ai-principles.md の「AI 利用の上限」） |
 
 ## フェーズごとの結果
 

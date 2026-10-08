@@ -119,6 +119,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10（第 4 回） | spec-trace: 対応表の `source:` を必須に（スキーマ・`--enforce-drift`）、spec-pin は `source:` の削除・差し替えにもラベルを求める。パラメータ化テストの結果を引数名の並びでメソッドごとに対応づける（別のメソッドの成功を数えない）。シナリオだけで裏付けた要件は、シナリオの実行結果が無ければ未証明（`trace.proof_unverified`）。AssertJ の `assertThat(x)` だけ（終端の検証なし）はアサーションに数えない。template を写し元（dev-environment e5705d7）に合わせた（S3 から読むときも不正な UTF-8 で例外→終了コード 8）。devtools-common の固定を 6a263b8 に。eval の記録の手順と例、AI 利用の上限を追記 | `source:` の無い対応表・`assertThat(x)` だけのテスト・シナリオだけの proven は D7・D8・D10 で落ちる。同じクラスに引数名の並びが同じパラメータ化テストが 2 つあると照合できない（引数名か表示名を変える） |
 | 2026-10 | PR で設計書の承認ハッシュ（`source_sha256`）が変わったら `spec-pin-approved` ラベルを求める CI（spec-pin）を追加。spec-trace: アサーションの判定をライブラリの明示リストに（`toString` などを数えない）、`symbol` の無い proofs をエラーに（スキーマでも必須）、Feature 全体の `@ignore` とテキストブロックに対応。template を写し元（dev-environment 2002ca0）に合わせた（入力ファイルの大きさの上限 `app.batch.max-input-bytes`、DefaultFileFetcher・S3Config のテスト）。spec-trace の devtools-common の固定を cbe97d5 に | pin を変える PR は、承認した人がラベルを付けるまで spec-pin が赤になる。`toString()` などしか呼ばないテスト・`symbol` の無い proofs・Feature ごと `@ignore` したシナリオは D7・D10 で落ちる |
 | 2026-10 | verify-gates.ps1 は `$env:PYTHON` → `python` の順で Python を選ぶ（`py` ランチャーを使わない）。手順は `python -m pip` | `py` だけで入れていた環境は、`python -m pip install …` で入れ直すか `$env:PYTHON` を指定する |
 | 2026-10 | template を写し元（dev-environment f8ad74d）に合わせた: `local/docker-compose.yml` のイメージ（DB・S3 エミュレータ）を `タグ@sha256:digest` で固定。spec-trace の devtools-common の固定を 2e25f8a に | `docker compose pull` しても同じタグの別の中身に変わらない。イメージの更新は写し元の Dependabot の後に取り込む |
