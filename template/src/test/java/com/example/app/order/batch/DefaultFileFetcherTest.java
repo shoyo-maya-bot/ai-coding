@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -110,6 +111,33 @@ class DefaultFileFetcherTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("上限 1024 バイト");
         assertThat(s3.aborted).isTrue();
+    }
+
+    /** UTF-8 として正しくないバイト列（0xFF は UTF-8 に現れない. 0xE3 0x81 は 3 バイト文字の途中で切れている）. */
+    static final byte[] INVALID_UTF8 = {'h', '\n', 'A', (byte) 0xFF, '\n', (byte) 0xE3, (byte) 0x81};
+
+    @Test
+    void rejectsS3ObjectThatIsNotValidUtf8() {
+        s3.body = INVALID_UTF8;
+        assertThatThrownBy(() -> new DefaultFileFetcher(s3, 1024).readLines("s3://b/k.csv"))
+                .isInstanceOf(CharacterCodingException.class)
+                .hasMessageContaining("UTF-8")
+                .hasMessageContaining("s3://b/k.csv");
+    }
+
+    @Test
+    void rejectsLocalFileThatIsNotValidUtf8(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("bad.csv");
+        Files.write(file, INVALID_UTF8);
+        // ローカルと S3 で同じ扱い（どちらも CharacterCodingException. 置き換えて読み進めない）
+        assertThatThrownBy(() -> new DefaultFileFetcher(s3, 1024).readLines(file.toString()))
+                .isInstanceOf(CharacterCodingException.class);
+    }
+
+    @Test
+    void readsMultibyteUtf8FromS3() throws IOException {
+        s3.body = "h\n注文,東京\n".getBytes(StandardCharsets.UTF_8);
+        assertThat(new DefaultFileFetcher(s3, 1024).readLines("s3://b/k")).containsExactly("h", "注文,東京");
     }
 
     @Test
