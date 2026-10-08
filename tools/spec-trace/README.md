@@ -19,7 +19,7 @@ spec-trace schema                                # 定義ファイルの JSON Sc
 | `trace.proof_no_assert` | テストに検証（下の「アサーションとみなす呼び出し」・Then 等）が無い |
 | `trace.proof_ignored` | シナリオ、またはそのシナリオを含む Feature 全体が `@ignore` / `@skip` / `@wip` / `@disabled` で無効化されている |
 | `trace.spec_drift` | 設計書が承認時から変わっている |
-| `trace.source_unpinned` / `trace.source_missing` | 設計書のハッシュが未記録 / 設計書が見つからない |
+| `trace.source_unpinned` / `trace.source_missing` | 設計書のハッシュが未記録 / 設計書が見つからない（`source_unpinned` は通常は警告、`--require proven`（verify-gates の `--final`・main）では error） |
 | `trace.source_unspecified` | 対応表に根拠の設計書（`source:`）が無い（スキーマでも必須。スキーマを通さないときも `--enforce-drift` ならエラー） |
 | `trace.duplicate_id` / `trace.not_done` | 要件 ID の重複 / `--require` の状態に達していない |
 | `trace.proof_failed` / `trace.proof_not_run` / `trace.proof_skipped` | （`--test-results` のとき）テストが失敗した / 結果に無い（実行されていない）/ スキップされた |

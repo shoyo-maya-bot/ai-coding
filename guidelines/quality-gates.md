@@ -26,7 +26,7 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D5 | バグパターン | SpotBugs の指摘 0（除外は理由付きでレビュー） | `spotbugsMain` |
 | D6 | 実装の実在 | implemented 以上の要件の実装箇所が実在 | `spec-trace check`（`trace.implements_*`） |
 | D7 | テストの実在と検証 | proven の要件のテストが実在し、アサーション 1 件以上。さらに、そのテストが実行されて成功している（JUnit の結果 XML と照合） | `spec-trace check --test-results`（`trace.proof_*`） |
-| D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致 | `spec-trace check --enforce-drift`（`trace.spec_drift`） |
+| D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致。完了時（`--final` = `--require proven`）はハッシュの記録（pin）も必須 | `spec-trace check --enforce-drift`（`trace.spec_drift`・`trace.source_unpinned`） |
 | D9 | SQL の安全性 | Mapper XML に `${}` が無い | `verifyMapperSql` |
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
 | D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある | `scripts/verify_authority.py` |
@@ -42,10 +42,11 @@ main への push では `--require proven`（全要件がテスト済み）を�
 ### 設計書の承認ハッシュ（pin）の変更には承認のラベル（spec-pin）
 
 `source_sha256`（pin）は、人が設計書を承認したときの記録です（[workflow.md](workflow.md) の「人だけが行うこと」）。
-pin を書き換えれば D8（`trace.spec_drift`）は通ってしまうので、PR で `traceability/specs` の pin が変わった・増えた・消えたときは、
+pin を書き換えれば D8（`trace.spec_drift`）は通ってしまうので、PR で `traceability/specs` の pin が変わった・増えた・消えたとき（pin の無い対応表を新しく足したときも）は、
 PR に **`spec-pin-approved` ラベル** が付いていないと CI の [spec-pin](../.github/workflows/spec-pin.yml)（`scripts/check_spec_pin.py`）が失敗します。
 
 - ラベルは、設計書を承認した人（RP1 のレビュアー）が差分を確かめてから付ける。エージェントは付けない
+- pin の無い対応表は、途中段階（PR の `--require implemented`）では `trace.source_unpinned` の警告ですが、完了時（`--final`）と main では error です
 - ラベルは PR のイベントから読む（API を呼ばないので権限は `contents: read` だけ）。ラベルを付け外しすると spec-pin が走り直す
 - 必須のチェックにするか（ブランチの保護・ルールセット）は、リポジトリの管理者が決める（このリポジトリの設定は変えていない）
 - 手元で試す: `python scripts/check_spec_pin.py --base origin/main --labels ""`（変わっていれば終了コード 1）

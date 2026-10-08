@@ -171,6 +171,36 @@ class DriftTest(Base):
         self.assertEqual(lines[i + 1], f'source_sha256: "{sha256_of(self.proj / "docs/design/order-import.md")}"')
 
 
+class UnpinnedSpecTest(Base):
+    """pin（source_sha256）の無い対応表は、完了時（--require proven = verify-gates --final）には通さない."""
+
+    def unpin(self) -> None:
+        p = self.proj / SPEC
+        kept = [ln for ln in p.read_text(encoding="utf-8").splitlines() if not ln.startswith("source_sha256:")]
+        p.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    def severity(self, data: dict, rule: str) -> str:
+        return [f["severity"] for f in data["findings"] if f["rule_id"] == rule][0]
+
+    def test_unpinned_is_warning_in_progress(self):
+        self.unpin()
+        rc, data = self.check("--require", "implemented", "--enforce-drift")
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.source_unpinned"]))
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "warning")
+
+    def test_unpinned_is_error_when_proven_is_required(self):
+        self.unpin()
+        rc, data = self.check("--require", "proven", "--enforce-drift")
+        self.assertEqual((rc, self.rules(data)), (1, ["trace.source_unpinned"]))
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "error")
+
+    def test_unpinned_is_error_with_proven_even_without_enforce_drift(self):
+        self.unpin()
+        rc, data = self.check("--require", "proven")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "error")
+
+
 class SpecFileTest(Base):
     def test_schema_error_is_usage_error(self):
         self.edit(SPEC, 'status: "proven"', 'status: "done"')
@@ -352,7 +382,7 @@ class TestResultsTest(Base):
         self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_assertion_exists_but_test_failed(self):
-        # 採点で見つかった穴: アサーションがあれば proven になり、テストが落ちていても気づけない
+        # 以前の穴: アサーションがあれば proven になり、テストが落ちていても気づけない
         failed = JUNIT_OK.replace(
             'time="0.01"/>',
             'time="0.01"><failure message="expected 0 but was 1">AssertionError</failure></testcase>',

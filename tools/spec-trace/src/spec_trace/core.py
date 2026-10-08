@@ -130,14 +130,18 @@ def _check_drift(spec: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
         ]
     pinned = spec.get("source_sha256")
     if not pinned:
+        # 完了時（--require proven = verify-gates --final・main）は、承認（pin）の無い設計書を根拠に「テスト済み」と
+        # しない。途中段階（implemented まで）は警告にとどめる
+        final = st.require == "proven"
         return [
             Finding(
                 "trace.source_unpinned",
-                Severity.WARNING,
-                "設計書のハッシュが未記録です（設計書が変わっても検知できません）",
+                Severity.ERROR if final else Severity.WARNING,
+                "設計書のハッシュが未記録です（設計書が変わっても検知できません）"
+                + ("。完了時（--require proven）は承認（pin）が必要です" if final else ""),
                 location=loc,
                 field="source_sha256",
-                suggestion=f"承認後に spec-trace pin {loc} で記録する",
+                suggestion=f"設計書を承認した人が spec-trace pin {loc} で記録する（PR には spec-pin-approved ラベル）",
             )
         ]
     current = sha256_of(path)

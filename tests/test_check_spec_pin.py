@@ -100,10 +100,30 @@ class SpecPinTest(unittest.TestCase):
         self.assertIn("y.yaml: pin を削除", out)
         self.assertIn("x.yaml: pin 付きの対応表を削除", out)
 
-    def test_added_spec_without_pin_passes(self):
+    def test_added_spec_without_pin_needs_label(self):
+        # pin の無い対応表を足すと、承認されていない設計書を根拠に要件を進められる（D8 は警告だけ）ので承認を求める
+        self.write("traceability/specs/new.yaml", 'spec_id: "FEAT-N"\nsource: "docs/n.md"\nrequirements: []\n')
+        rc, out = self.run_main("--event", self.event([]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("new.yaml: pin なしで追加", out)
+        self.assertEqual(self.run_main("--event", self.event(["spec-pin-approved"]))[0], 0)
+
+    def test_added_spec_without_pin_or_source_needs_label(self):
         self.write("traceability/specs/new.yaml", 'spec_id: "FEAT-N"\nrequirements: []\n')
-        rc, _ = self.run_main("--event", self.event([]))
-        self.assertEqual(rc, 0)
+        rc, out = self.run_main("--event", self.event([]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("new.yaml: pin なしで追加", out)
+
+    def test_unchanged_spec_without_pin_at_base_passes(self):
+        # base の時点で既に pin が無い対応表は、この PR の変更ではないので求めない（--final の spec-trace が止める）
+        self.write("traceability/specs/y.yaml", SPEC.format(A).replace('source_sha256: "' + A + '"\n', ""))
+        git(self.tmp, "add", "-A")
+        git(self.tmp, "commit", "-q", "-m", "unpin y")
+        self.base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.tmp, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        rc, out = self.run_main("--event", self.event([]))
+        self.assertEqual(rc, 0, out)
 
     def test_labels_from_cli_for_local_use(self):
         self.write("traceability/specs/x.yaml", SPEC.format(B))
