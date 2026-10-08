@@ -19,7 +19,7 @@ from devtools_common.cli import run_main
 from devtools_common.report import report_schema
 
 from spec_trace import cli
-from spec_trace.code import is_generated_test, lookup_scenario, lookup_symbol, split_symbol
+from spec_trace.code import is_generated_test, lookup_scenario, lookup_symbol, split_case, split_symbol
 from spec_trace.core import sha256_of
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -364,6 +364,77 @@ class TestResultsTest(Base):
         )
         self.assertTrue(is_generated_test(java, "XTest#parseRejects"))
         self.assertFalse(is_generated_test(java, "XTest#plain"))
+
+    # --- 第 2 回の指摘: pytest のパラメータ化テスト（test_x[case1] など）の照合 ---
+
+    def pytest_param(self, *cases: str) -> str:
+        """test_import_is_idempotent を parametrize した結果（name="test_import_is_idempotent[id]"）."""
+        rows = "".join(
+            f'<testcase classname="tests.test_order_import" name="test_import_is_idempotent[{cid}]">{body}</testcase>'
+            for cid, body in (c.split("|", 1) if "|" in c else (c, "") for c in cases)
+        )
+        return PYTEST_OK.replace(
+            '<testcase classname="tests.test_order_import" name="test_import_is_idempotent" time="0.001"/>', rows
+        )
+
+    def test_pytest_parametrize_all_passed(self):
+        rc, data = self.check("--test-results", str(self.results(pytest=self.pytest_param("case1", "a.b::c-1"))))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+
+    def test_pytest_parametrize_one_failed(self):
+        junit = self.pytest_param("case1", 'case2|<failure message="boom"/>')
+        rc, data = self.check("--test-results", str(self.results(pytest=junit)))
+        self.assertEqual(rc, 1)
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_failed"][0]
+        self.assertIn("1 / 2", f["message"])
+        self.assertIn("test_import_is_idempotent[case2]", f["actual"])
+
+    def test_symbol_with_case_id_matches_only_that_case(self):
+        # 対応表に test_x[case1] と 1 件だけ書いたときは、その実行分だけを見る（他の id の失敗は関係ない）
+        junit = self.pytest_param("case1", 'case2|<failure message="boom"/>')
+        spec = "traceability/order-import.yaml"
+        self.edit(spec, 'symbol: "test_import_is_idempotent"', 'symbol: "test_import_is_idempotent[case1]"')
+        rc, data = self.check("--test-results", str(self.results(pytest=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+        # 失敗した id を指すと失敗、結果に無い id は実行されていない扱い
+        self.edit(spec, 'symbol: "test_import_is_idempotent[case1]"', 'symbol: "test_import_is_idempotent[case2]"')
+        rc, data = self.check("--test-results", str(self.results(pytest=junit)))
+        self.assertIn("trace.proof_failed", self.rules(data))
+        self.edit(spec, 'symbol: "test_import_is_idempotent[case2]"', 'symbol: "test_import_is_idempotent[nope]"')
+        rc, data = self.check("--test-results", str(self.results(pytest=junit)))
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_symbol_with_dotted_case_id_is_found_in_source(self):
+        # [id] の中の . や :: をクラス名の区切りと取り違えない
+        self.assertEqual(
+            split_symbol("TestOrderValidator#test_required[a.b::c]"), ("TestOrderValidator", "test_required")
+        )
+        self.assertEqual(split_symbol("test_x[1.5]"), (None, "test_x"))
+        self.assertEqual(split_case("Cls#m[1.5]"), ("Cls#m", "1.5"))
+        self.assertEqual(split_case("test_x"), ("test_x", None))
+        self.assertTrue(lookup_symbol(self.proj / "tests/test_order_import.py", "test_import_is_idempotent[x.y]").found)
+
+    def test_module_function_is_not_mixed_with_same_named_method(self):
+        # クラスの外の test_x と、クラスの中の同名の test_x（pytest の classname が モジュール.クラス）を混ぜない
+        junit = PYTEST_OK.replace(
+            "</testsuite>",
+            '<testcase classname="tests.test_order_import.TestOther" name="test_import_is_idempotent[a]">'
+            '<failure message="other class"/></testcase></testsuite>',
+        )
+        rc, data = self.check("--test-results", str(self.results(pytest=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
+
+    def test_java_parameterized_case_id(self):
+        self.use_parameterized_test()
+        self.edit("traceability/order-import.yaml", "OrderImportJobTest#other", "OrderImportJobTest#other[2]")
+        junit = JUNIT_OK.replace(
+            '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest" time="0.01"/>',
+            '<testcase name="other(String)[1]" classname="com.example.batch.order.OrderImportJobTest">'
+            '<failure message="boom"/></testcase>'
+            '<testcase name="other(String)[2]" classname="com.example.batch.order.OrderImportJobTest"/>',
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.proof_result_unchecked"]))
 
     def test_results_dir_without_xml_is_usage_error(self):
         empty = self.tmp / "empty"
