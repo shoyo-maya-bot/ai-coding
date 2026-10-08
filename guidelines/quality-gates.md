@@ -22,14 +22,14 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D1 | コンパイル | エラー 0（Java 17 向け） | `compileJava` |
 | D2 | コーディング規約 | Checkstyle の違反 0 | `checkstyleMain` / `checkstyleTest` |
 | D3 | 単体テスト | 全件成功 | `test` |
-| D4 | 分岐網羅 | Service・Job の分岐網羅率が閾値以上（既定 80%。目標 100% に向けて引き上げる） | `jacocoTestCoverageVerification`（`-PbranchCoverageMinimum=1.0`） |
+| D4 | 分岐網羅 | Service・Job の分岐網羅率が閾値以上（下限 80%。目標 100% に向けて引き上げる。下限より下げる指定は失敗し、D11 も検出） | `jacocoTestCoverageVerification`（上げるとき `-PbranchCoverageMinimum=1.0`） |
 | D5 | バグパターン | SpotBugs の指摘 0（除外は理由付きでレビュー） | `spotbugsMain` |
 | D6 | 実装の実在 | implemented 以上の要件の実装箇所が実在 | `spec-trace check`（`trace.implements_*`） |
 | D7 | テストの実在と検証 | proven の要件のテストが実在し、アサーション 1 件以上。さらに、そのテストが実行されて成功している（JUnit の結果 XML と照合） | `spec-trace check --test-results`（`trace.proof_*`） |
 | D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致。完了時（`--final` = `--require proven`）はハッシュの記録（pin）も必須 | `spec-trace check --enforce-drift`（`trace.spec_drift`・`trace.source_unpinned`） |
 | D9 | SQL の安全性 | Mapper XML に `${}` が無い | `verifyMapperSql` |
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
-| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある | `scripts/verify_authority.py` |
+| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures = true`・`failOnViolation = false`・`maxWarnings` が 0 以外・`enabled = false`・D4 の下限の引き下げ）、D4 の閾値を外から下げていない | `scripts/verify_authority.py` |
 
 D10 の Karate シナリオは、起動中のアプリと DB が要るので、この CI では実行しません（`spec-trace` は `trace.proof_result_unchecked` の警告で知らせます）。
 そのため、シナリオ**だけ**で裏付けている要件は `--test-results` で未証明（`trace.proof_unverified`）になります。単体テストも proofs に書いてください
