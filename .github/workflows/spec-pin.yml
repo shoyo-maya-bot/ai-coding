@@ -1,0 +1,39 @@
+# 設計書の承認ハッシュ（traceability/specs の source_sha256 = pin）が変わった PR に、承認のラベルを求める（ユーザーの決定 3）.
+#
+# - pin は人が設計書を承認したときの記録（guidelines/workflow.md の「人だけが行うこと」）。変わっていれば、
+#   PR に spec-pin-approved ラベルが無い限り失敗する（ラベルは設計書を承認した人が付ける）
+# - ラベルは PR のイベント（GITHUB_EVENT_PATH）から読む（API を呼ばないので、トークンの権限は contents: read だけ）
+# - ラベルの付け外し（labeled / unlabeled）でも走り直し、結果が更新される
+# - 重いゲート（ci.yml）とは分け、ラベルの付け外しで Java のビルドまで走らないようにしている
+name: spec-pin
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-pin-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  spec-pin:
+    name: spec-pin (source_sha256 の変更には spec-pin-approved ラベル)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # 比較元（PR の base のコミット）の対応表を git show で読む
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install
+        run: |
+          if [ -f constraints.txt ]; then c="-c constraints.txt"; else c=""; fi
+          python -m pip install pyyaml $c
+      - name: check_spec_pin.py
+        run: python scripts/check_spec_pin.py

@@ -37,6 +37,17 @@ D10 の Karate シナリオは、起動中のアプリと DB が要るので、�
 CI でマージ前に必須とするのは D1〜D11 全部です。要件の状態は、PR では `--require implemented`（途中段階でも全要件が実装済み）、
 main への push では `--require proven`（全要件がテスト済み）を求めます。完了時（PR 前）は手元でも `--final`（`--require proven`）で確かめます。
 
+### 設計書の承認ハッシュ（pin）の変更には承認のラベル（spec-pin）
+
+`source_sha256`（pin）は、人が設計書を承認したときの記録です（[workflow.md](workflow.md) の「人だけが行うこと」）。
+pin を書き換えれば D8（`trace.spec_drift`）は通ってしまうので、PR で `traceability/specs` の pin が変わった・増えた・消えたときは、
+PR に **`spec-pin-approved` ラベル** が付いていないと CI の [spec-pin](../.github/workflows/spec-pin.yml)（`scripts/check_spec_pin.py`）が失敗します。
+
+- ラベルは、設計書を承認した人（RP1 のレビュアー）が差分を確かめてから付ける。エージェントは付けない
+- ラベルは PR のイベントから読む（API を呼ばないので権限は `contents: read` だけ）。ラベルを付け外しすると spec-pin が走り直す
+- 必須のチェックにするか（ブランチの保護・ルールセット）は、リポジトリの管理者が決める（このリポジトリの設定は変えていない）
+- 手元で試す: `python scripts/check_spec_pin.py --base origin/main --labels ""`（変わっていれば終了コード 1）
+
 ### 設計書を別リポジトリに置くとき（D8）
 
 D8 は設計書の実物が無いと判定できません。CI では設計書リポジトリも checkout し、ローカルと同じ「隣同士」の配置にします。

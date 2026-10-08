@@ -119,6 +119,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10 | PR で設計書の承認ハッシュ（`source_sha256`）が変わったら `spec-pin-approved` ラベルを求める CI（spec-pin）を追加。spec-trace: アサーションの判定をライブラリの明示リストに（`toString` などを数えない）、`symbol` の無い proofs をエラーに（スキーマでも必須）、Feature 全体の `@ignore` とテキストブロックに対応。template を写し元（dev-environment 2002ca0）に合わせた（入力ファイルの大きさの上限 `app.batch.max-input-bytes`、DefaultFileFetcher・S3Config のテスト）。spec-trace の devtools-common の固定を cbe97d5 に | pin を変える PR は、承認した人がラベルを付けるまで spec-pin が赤になる。`toString()` などしか呼ばないテスト・`symbol` の無い proofs・Feature ごと `@ignore` したシナリオは D7・D10 で落ちる |
 | 2026-10 | verify-gates.ps1 は `$env:PYTHON` → `python` の順で Python を選ぶ（`py` ランチャーを使わない）。手順は `python -m pip` | `py` だけで入れていた環境は、`python -m pip install …` で入れ直すか `$env:PYTHON` を指定する |
 | 2026-10 | template を写し元（dev-environment f8ad74d）に合わせた: `local/docker-compose.yml` のイメージ（DB・S3 エミュレータ）を `タグ@sha256:digest` で固定。spec-trace の devtools-common の固定を 2e25f8a に | `docker compose pull` しても同じタグの別の中身に変わらない。イメージの更新は写し元の Dependabot の後に取り込む |
 | 2026-10 | template を写し元（dev-environment f497a2c）に合わせた: ポートを 127.0.0.1 だけで公開、Gradle の配布物の SHA-256 を検証、upload-sample が local/.env を読む | 同じネットワークの他の PC から DB・S3 エミュレータにつながらなくなる |
