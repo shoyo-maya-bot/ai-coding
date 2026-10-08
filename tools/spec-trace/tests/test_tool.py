@@ -178,6 +178,27 @@ class SpecFileTest(Base):
         self.assertEqual(rc, 2)
         self.assertIn("形式が不正", err)
 
+    def test_proof_without_symbol_is_rejected_by_schema(self):
+        # 第 3 回の指摘: symbol の無い proofs で proven になっていた（ファイルがあるだけで裏付け扱い）
+        self.edit(SPEC, '        symbol: "TestOrderValidator#test_required"\n', "")
+        rc, _, err = run_cli("check", str(self.proj / "traceability"), "--root", str(self.proj))
+        self.assertEqual(rc, 2)
+        self.assertIn("形式が不正", err)
+        self.edit(
+            SPEC,
+            '      - file: "tests/test_order_import.py"\n        type: "abnormal"',
+            '      - file: "tests/test_order_import.py"\n        symbol: ""',
+        )
+        rc, _, err = run_cli("check", str(self.proj / "traceability"), "--root", str(self.proj))
+        self.assertEqual(rc, 2)  # 空の symbol も不可
+
+    def test_proof_without_symbol_is_error_even_without_schema(self):
+        from spec_trace.core import Settings, _check_proofs
+
+        req = {"id": "R", "status": "proven", "proofs": [{"file": "tests/test_order_import.py"}]}
+        found = _check_proofs(req, "x.yaml#R", Settings(root=self.proj))
+        self.assertEqual([(f.rule_id, f.severity.value) for f in found], [("trace.proof_symbol_missing", "error")])
+
     def test_duplicate_id_across_files(self):
         shutil.copy(self.proj / SPEC, self.proj / "traceability/copy.yaml")
         _, data = self.check()
@@ -216,7 +237,7 @@ class CodeLookupTest(unittest.TestCase):
         kt = self.write("T.kt", "class T {\n  @Test\n  fun works() {\n    assertEquals(1, 1)\n  }\n}\n")
         self.assertEqual(lookup_symbol(kt, "T#works").asserts, 1)
         ts = self.write("a.test.ts", "describe('x', () => {});\nfunction helper() {\n  expect(1).toBe(1);\n}\n")
-        self.assertEqual(lookup_symbol(ts, "helper").asserts, 2)
+        self.assertEqual(lookup_symbol(ts, "helper").asserts, 1)  # expect(…).toBe(…) は 1 件（.toBe は数えない）
 
     def test_mockmvc_and_expect_counts(self):
         body = '    mvc.perform(get("/")).andExpect(status().isOk());\n'
@@ -226,6 +247,63 @@ class CodeLookupTest(unittest.TestCase):
     def test_python_mock_assertions_count(self):
         p = self.write("t.py", "def test_x(m):\n    m.run()\n    m.run.assert_called_once()\n")
         self.assertEqual(lookup_symbol(p, "test_x").asserts, 1)
+
+    def test_non_assertion_to_calls_are_not_counted(self):
+        # 第 3 回の指摘: .to\w+( を数えていたので、toString / toList だけのテストが「検証あり」になっていた
+        body = (
+            "    String s = x.toString();\n    var l = y.stream().toList();\n    s.toUpperCase();\n    z.toArray();\n"
+        )
+        p = self.write("N.java", "class N {\n  @Test\n  void t() {\n" + body + "  }\n}\n")
+        self.assertEqual(lookup_symbol(p, "N#t").asserts, 0)
+
+    def test_explicit_assertion_libraries_are_counted(self):
+        cases = {
+            "assertThat(a).isEqualTo(1);": 1,  # AssertJ（後ろの isEqualTo は数えない）
+            "assertThatThrownBy(() -> f()).isInstanceOf(E.class);": 1,
+            "assertEquals(1, a);": 1,  # JUnit
+            "assertThat(a, is(1));": 1,  # Hamcrest
+            "Assertions.assertTrue(a);": 1,
+            "verify(repo).save(x);": 1,  # Mockito
+            "verifyNoMoreInteractions(repo);": 1,
+            "then(repo).should().save(x);": 1,  # BDDMockito
+            "mvc.perform(get(u)).andExpect(status().isOk()).andExpect(jsonPath(p).value(1));": 2,
+            "client.get().exchange().expectStatus().isOk();": 1,  # WebTestClient
+            "fail(msg);": 1,
+            "Assert.Equal(1, a);": 1,  # xUnit
+        }
+        for line, n in cases.items():
+            with self.subTest(line=line):
+                p = self.write("A.java", "class A {\n  @Test\n  void t() {\n    " + line + "\n  }\n}\n")
+                self.assertEqual(lookup_symbol(p, "A#t").asserts, n)
+
+    def test_java_text_block_is_a_string(self):
+        # 第 3 回の指摘: テキストブロック（"""）の中の assertThat( や } をコードとして数えていた
+        src = (
+            "class U {\n  @Test\n  void t() {\n"
+            '    String q = """\n        assertThat(x)\n        }\n        """;\n'
+            "    run(q);\n  }\n  void hidden() {}\n}\n"
+        )
+        p = self.write("U.java", src)
+        self.assertEqual(lookup_symbol(p, "U#t").asserts, 0)
+        self.assertTrue(lookup_symbol(p, "U#hidden").found)  # テキストブロックの } でクラスの本体が途切れない
+        esc = (
+            'class V {\n  void t() {\n    String q = """\n      a \\""" b\n      """;\n'
+            "    assertEquals(1, 1);\n  }\n}\n"
+        )
+        self.assertEqual(lookup_symbol(self.write("V.java", esc), "V#t").asserts, 1)  # \""" は終わりではない
+
+    def test_feature_level_ignore_tag(self):
+        # 第 3 回の指摘: Feature 全体のタグ（@ignore）を見ていなかった
+        for tag in ("@ignore", "@skip", "@wip", "@disabled", "@smoke @ignore"):
+            with self.subTest(tag=tag):
+                p = self.write("f.feature", f"{tag}\nFeature: x\n\n  Scenario: s\n    When a\n    Then b\n")
+                self.assertTrue(lookup_scenario(p, "s").ignored)
+        p = self.write(
+            "g.feature", "# コメント\n@smoke\nFeature: x\n\n  @regression\n  Scenario: s\n    When a\n    Then b\n"
+        )
+        self.assertFalse(lookup_scenario(p, "s").ignored)
+        p = self.write("h.feature", "@ignore\n機能: x\n\n  シナリオ: s\n    もし a\n    ならば b\n")
+        self.assertTrue(lookup_scenario(p, "s").ignored)
 
     def test_japanese_gherkin(self):
         p = self.write("a.feature", "機能: x\n\n  シナリオ: 正常\n    前提 a\n    もし b\n    ならば c\n")

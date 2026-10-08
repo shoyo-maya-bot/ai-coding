@@ -15,8 +15,9 @@ spec-trace schema                                # 定義ファイルの JSON Sc
 |---|---|
 | `trace.implements_empty` / `trace.implements_missing` | 実装済みなのに実装箇所が無い・見つからない |
 | `trace.proofs_empty` / `trace.proof_missing` | テスト済みなのにテストが無い・見つからない |
-| `trace.proof_no_assert` | テストに検証（assert / verify / expect / Then 等）が無い |
-| `trace.proof_ignored` | シナリオが `@ignore` 等で無効化されている |
+| `trace.proof_symbol_missing` | テスト（proofs）にテスト関数（`symbol`）もシナリオ（`scenario`）も書かれていない（スキーマでも必須） |
+| `trace.proof_no_assert` | テストに検証（下の「アサーションとみなす呼び出し」・Then 等）が無い |
+| `trace.proof_ignored` | シナリオ、またはそのシナリオを含む Feature 全体が `@ignore` / `@skip` / `@wip` / `@disabled` で無効化されている |
 | `trace.spec_drift` | 設計書が承認時から変わっている |
 | `trace.source_unpinned` / `trace.source_missing` | 設計書のハッシュが未記録 / 設計書が見つからない |
 | `trace.duplicate_id` / `trace.not_done` | 要件 ID の重複 / `--require` の状態に達していない |
@@ -45,4 +46,19 @@ spec-trace check traceability/specs --root . --require proven --test-results tem
 - Karate などのシナリオ（`.feature`）は照合せず、`trace.proof_result_unchecked` の警告を出す
 
 Python は構文木、Java / Kotlin / TypeScript 等は宣言行と括弧の対応による近似、Gherkin（英語・日本語）に対応します。
+Java のテキストブロック・Kotlin の raw 文字列（`"""…"""`）の中身は文字列として外して数えます。
+
+### アサーションとみなす呼び出し（Python 以外）
+
+`toString()`・`toList()`・`toUpperCase()` のような普通の呼び出しを数えないよう、テストライブラリの名前を明示しています（`code.py` の `_ASSERT_NAMES`）。
+
+| ライブラリ | 数える呼び出し |
+|---|---|
+| JUnit・TestNG・Hamcrest・AssertJ・kotlin.test | `assertXxx(…)`（`assertEquals`・`assertThat`・`assertThatThrownBy`・`assertThrows` など）、`assert(…)`、`fail(…)` |
+| xUnit・NUnit・MSTest・testify | `Assert.Xxx(…)`・`assert.Xxx(…)`・`require.Xxx(…)` |
+| Mockito・BDDMockito | `verify(…)`・`verifyNoInteractions(…)`・`verifyNoMoreInteractions(…)`、`.should(…)`・`.shouldHaveNoInteractions(…)` |
+| Spring MockMvc・WebTestClient | `.andExpect(…)`・`.andExpectAll(…)`、`.expectStatus()`・`.expectBody(…)`・`.expectHeader()` |
+| Jest・Vitest・Chai | `expect(…)`（後ろの `.toBe(…)` などは数えない。1 つの `expect` で 1 件） |
+| Kotest | `shouldXxx(…)`（`shouldBe`・`shouldThrow<…>` など） |
+| Go の testing | `t.Error(…)`・`t.Errorf(…)`・`t.Fatal(…)`・`t.Fatalf(…)`・`t.Fail()` |
 保証するのは「存在」と「最低限の検証」までで、テストの意味的な妥当性は人がレビューします。

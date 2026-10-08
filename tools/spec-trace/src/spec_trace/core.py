@@ -271,6 +271,18 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
             continue
         symbol = it.get("symbol")
         if not symbol:
+            # どのテストかを指していない proof は裏付けにならない（ファイルがあるだけで proven にしない）
+            out.append(
+                Finding(
+                    "trace.proof_symbol_missing",
+                    Severity.ERROR,
+                    "テスト（proofs）にテスト関数（symbol）が書かれていません",
+                    location=loc,
+                    field="proofs.symbol",
+                    actual=it["file"],
+                    suggestion="テスト関数を symbol に書く（クラス名#メソッド名）。.feature なら scenario",
+                )
+            )
             continue
         found = lookup_symbol(path, symbol)
         if not found.found:
