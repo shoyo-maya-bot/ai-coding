@@ -12,11 +12,32 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# Python 以外でアサーションとみなす呼び出し（JUnit / AssertJ / Mockito / MockMvc / Jest / Chai / xUnit / testing など）
-_ASSERT_CALL = re.compile(
-    r"\b(?:assert\w*|verify\w*|expect|should\w*|fail|t\.(?:Error|Errorf|Fatal|Fatalf))\s*\(|"
-    r"\.(?:to\w+|should\w*|andExpect\w*)\s*\(|\bAssert\.\w+\s*\("
-)
+# Python 以外でアサーションとみなす呼び出し. 「to で始まる・should で始まるメソッド」のような広い形にすると、
+# toString() / toList() / toUpperCase() などの普通の呼び出しまで数えてしまうので、ライブラリごとの名前を明示する.
+_ASSERT_NAMES = [
+    # JUnit 4/5・TestNG・Hamcrest・AssertJ・kotlin.test:
+    #   assertEquals / assertThat / assertThatThrownBy / assertThrows …
+    r"\bassert[A-Z_]\w*\s*\(",
+    r"\bassert\s*\(",  # Node の assert(x)・C の assert
+    r"\bfail\s*\(",
+    # xUnit・NUnit・MSTest（C#）、testify（Go）: Assert.Equal( / assert.Equal( / require.NoError(
+    r"\b(?:Assert|CollectionAssert|StringAssert|assert|require)\.\w+\s*\(",
+    # Mockito: verify(mock).x() / verifyNoInteractions / verifyNoMoreInteractions / verifyZeroInteractions
+    # BDDMockito: then(m).should()
+    r"\bverify(?:NoInteractions|NoMoreInteractions|ZeroInteractions)?\s*\(",
+    r"\.should(?:HaveNoInteractions|HaveNoMoreInteractions|HaveZeroInteractions)?\s*\(",
+    # Spring: MockMvc の andExpect / andExpectAll
+    #   WebTestClient の expectStatus / expectBody / expectHeader / expectCookie
+    r"\.andExpect(?:All)?\s*\(",
+    r"\.expect(?:Status|Body|BodyList|Header|Cookie)\s*\(",
+    # Jest・Vitest・Chai（expect 1 回で 1 件。後ろの .toBe() などは数えない）
+    r"\bexpect\s*\(",
+    # Kotest・Chai（should）: x.shouldBe(1) / shouldThrow<…> { } / x.should(…)
+    r"\bshould[A-Z]\w*\s*[(<{]",
+    # Go の testing
+    r"\bt\.(?:Error|Errorf|Fatal|Fatalf|Fail|FailNow)\s*\(",
+]
+_ASSERT_CALL = re.compile("|".join(_ASSERT_NAMES))
 _CLASS_DECL = r"(?:class|interface|enum|record|object|struct|trait)"
 
 
@@ -88,12 +109,21 @@ def _py_lookup(text: str, symbol: str) -> Lookup:
 
 
 def _strip_comments_and_strings(text: str) -> str:
-    """// コメント・/* */・文字列リテラルを空白に置き換える（位置は保つ）."""
+    """// コメント・/* */・文字列リテラルを空白に置き換える（位置は保つ）.
+
+    Java 15 以降のテキストブロック・Kotlin の raw 文字列（\"\"\" … \"\"\"）も 1 つの文字列として外す
+    （中の assertThat( や } をコードとして数えない）。
+    """
 
     def blank(m: re.Match[str]) -> str:
         return re.sub(r"[^\n]", " ", m.group(0))
 
-    return re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|`[^`]*`', blank, text, flags=re.S)
+    return re.sub(
+        r'//[^\n]*|/\*.*?\*/|"""(?:\\.|[^\\])*?"""|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|`[^`]*`',
+        blank,
+        text,
+        flags=re.S,
+    )
 
 
 def _body_after(code: str, start: int) -> str | None:
@@ -195,6 +225,8 @@ def lookup_symbol(path: Path, symbol: str) -> Lookup:
 # --- Gherkin（.feature）---------------------------------------------------
 
 _SCENARIO = re.compile(r"^\s*(?:Scenario(?: Outline)?|Example|シナリオ(?:アウトライン)?)\s*:\s*(.*?)\s*$")
+_FEATURE = re.compile(r"^\s*(?:Feature|機能|フィーチャ)\s*:")
+_IGNORE_TAGS = {"@ignore", "@skip", "@wip", "@disabled"}
 _TAGS = re.compile(r"^\s*@")
 _THEN = re.compile(r"^\s*(?:Then|And|But|\*|ならば|かつ|しかし)\s+")
 _KARATE_ASSERT = re.compile(r"^\s*(?:\*|Then|And)\s+(?:match|assert|status)\b")
@@ -207,18 +239,29 @@ class ScenarioInfo:
     checks: int = 0
 
 
+def _tags_above(lines: list[str], i: int) -> list[str]:
+    """i 行目（Feature: / Scenario: など）の直前に書かれたタグ（空行・コメント行は飛ばす）."""
+    tags: list[str] = []
+    j = i - 1
+    while j >= 0 and (_TAGS.match(lines[j]) or not lines[j].strip() or lines[j].lstrip().startswith("#")):
+        if _TAGS.match(lines[j]):
+            tags += lines[j].split()
+        j -= 1
+    return tags
+
+
 def lookup_scenario(path: Path, scenario: str) -> ScenarioInfo:
+    """シナリオを探す. Feature 全体に付いたタグ（@ignore など）もシナリオに効くので、両方を見る."""
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    feature_tags: list[str] = []
     for i, line in enumerate(lines):
+        if _FEATURE.match(line):
+            feature_tags = _tags_above(lines, i)
+            continue
         m = _SCENARIO.match(line)
         if not m or m.group(1) != scenario:
             continue
-        tags = []
-        j = i - 1
-        while j >= 0 and (_TAGS.match(lines[j]) or not lines[j].strip()):
-            if lines[j].strip():
-                tags += lines[j].split()
-            j -= 1
+        tags = feature_tags + _tags_above(lines, i)
         checks = 0
         seen_then = False
         for body in lines[i + 1 :]:
@@ -228,5 +271,5 @@ def lookup_scenario(path: Path, scenario: str) -> ScenarioInfo:
                 seen_then = True
             if _KARATE_ASSERT.match(body) or (seen_then and _THEN.match(body)):
                 checks += 1
-        return ScenarioInfo(True, ignored=any(t in {"@ignore", "@skip", "@wip"} for t in tags), checks=checks)
+        return ScenarioInfo(True, ignored=any(t in _IGNORE_TAGS for t in tags), checks=checks)
     return ScenarioInfo(False)

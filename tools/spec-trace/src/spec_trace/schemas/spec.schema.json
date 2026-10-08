@@ -45,10 +45,12 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["file"],
+              "anyOf": [{"required": ["symbol"]}, {"required": ["scenario"]}],
+              "description": "テストは symbol（テスト関数）か scenario（.feature のシナリオ）のどちらかが必須（どのテストかを指さない proof は裏付けにならない）",
               "properties": {
                 "file": {"type": "string", "description": "テストファイル、または Gherkin の .feature"},
-                "symbol": {"type": "string", "description": "テスト関数（クラス名#メソッド名 可）。.feature では使わない"},
-                "scenario": {"type": "string", "description": ".feature のシナリオ名"},
+                "symbol": {"type": "string", "minLength": 1, "description": "テスト関数（クラス名#メソッド名 可）。.feature では使わない"},
+                "scenario": {"type": "string", "minLength": 1, "description": ".feature のシナリオ名"},
                 "type": {"type": "string", "description": "normal / abnormal / boundary など自由"}
               }
             }
