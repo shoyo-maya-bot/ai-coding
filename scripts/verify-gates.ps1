@@ -3,7 +3,7 @@
 #   .\scripts\verify-gates.ps1 -Final    完了時・main と同じ（全要件 proven）
 # ゲートの一覧と順番は verify-gates.sh と同じにする（tests/test_verify_gates.py が確かめる）.
 # ゲートを通すためにチェックを甘くしないこと（guidelines/workflow.md の禁止事項）
-# 前提: Java 17、Python 3.10 以上で python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt
+# 前提: Java 17、Python 3.10 以上で python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt
 param([switch]$Final)
 # 外部コマンド（gradle・pip など）が標準エラーに書いただけでは止めない（結果は終了コードで判定する）
 $ErrorActionPreference = 'Continue'
@@ -26,7 +26,7 @@ function Invoke-Gate([string]$Name, [scriptblock]$Command) {
 # gate: java
 Invoke-Gate 'D1-D5,D9 Java' { & .\template\gradlew.bat -p template --no-daemon --continue qualityGate }
 # gate: pytest
-Invoke-Gate 'tools tests' { & $py -m pytest -q tools/spec-trace/tests tests }
+Invoke-Gate 'tools tests' { & $py -m pytest -q tools/spec-trace/tests tools/test-scaffold/tests tests }
 # gate: ruff
 Invoke-Gate 'lint' {
     & $py -m ruff check tools scripts tests

@@ -4,7 +4,7 @@
 #   ./scripts/verify-gates.sh --final     完了時・main と同じ（全要件 proven）
 # ゲートの一覧と順番は verify-gates.ps1 と同じにする（tests/test_verify_gates.py が確かめる）.
 # ゲートを通すためにチェックを甘くしないこと（guidelines/workflow.md の禁止事項）
-# 前提: Java 17、Python 3.10 以上で python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt（PYTHON で Python を指定できる）
+# 前提: Java 17、Python 3.10 以上で python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt（PYTHON で Python を指定できる）
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REQUIRE="implemented"
@@ -24,7 +24,7 @@ run() {
 # gate: java
 run "D1-D5,D9 Java" template/gradlew -p template --no-daemon --continue qualityGate
 # gate: pytest
-run "tools tests" "$PY" -m pytest -q tools/spec-trace/tests tests
+run "tools tests" "$PY" -m pytest -q tools/spec-trace/tests tools/test-scaffold/tests tests
 # gate: ruff
 lint() {
   "$PY" -m ruff check tools scripts tests && "$PY" -m ruff format --check tools scripts tests
