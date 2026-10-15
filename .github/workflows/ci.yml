@@ -39,7 +39,7 @@ jobs:
       - name: install (constraints.txt で版を固定)
         run: |
           if [ -f constraints.txt ]; then c="-c constraints.txt"; else echo "::warning::constraints.txt がありません"; c=""; fi
-          python -m pip install -e "tools/spec-trace[dev]" pyyaml $c
+          python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml $c
       - name: verify-gates
         run: |
           set -o pipefail
@@ -84,8 +84,8 @@ jobs:
       - name: install (constraints.txt で版を固定)
         shell: powershell
         run: |
-          if (Test-Path constraints.txt) { python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt }
-          else { python -m pip install -e "tools/spec-trace[dev]" pyyaml }
+          if (Test-Path constraints.txt) { python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt }
+          else { python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml }
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: verify-gates.ps1 (Windows PowerShell 5.1)
         shell: powershell
@@ -134,10 +134,10 @@ jobs:
       - name: install
         run: |
           if [ -f constraints.txt ]; then c="-c constraints.txt"; else c=""; fi
-          python -m pip install -e tools/spec-trace pyyaml $c
+          python -m pip install -e tools/spec-trace -e tools/test-scaffold pyyaml $c
           python -m pip install "bandit==1.8.6" "pip-audit==2.9.0"
       - name: SAST（bandit. 中以上）
-        run: bandit -q -r tools/spec-trace/src scripts -ll
+        run: bandit -q -r tools/spec-trace/src tools/test-scaffold/src scripts -ll
       # devtools-common は git の URL で入れる（PyPI に無い）ので、pip-audit の対象から外れる（--skip-editable と同じ扱い）
       - name: 依存の脆弱性（pip-audit）
         run: pip-audit --skip-editable --progress-spinner off

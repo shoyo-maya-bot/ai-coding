@@ -12,6 +12,7 @@
 | ルール（唯一の正） | [guidelines/](guidelines/README.md) | 規約・構成・品質ゲート・レビュー観点・AI 活用の原則。AI も人もここだけを根拠にする |
 | 検証 | [template/build.gradle](template/build.gradle)、[tools/spec-trace](tools/spec-trace/)、[scripts/](scripts/) | 決定論ゲート D1〜D11（コンパイル・規約・テスト・分岐網羅・バグパターン・SQL・対応表の実在・設計書ドリフト・ルールの裏付け） |
 | 実行 | [.github/agents/](.github/agents/)、[.github/prompts/](.github/prompts/) | 役割別のエージェント（計画・実装・テスト・突合・進行） |
+| 下準備 | [tools/test-scaffold](tools/test-scaffold/) | Excel のテスト仕様書から JUnit 5 のテストの雛形を作る（LLM を使わない。本体は `fail` で、雛形のままでは通らない） |
 
 **AI の生成物は β 版です。人の全量レビューを前提にします。** 品質担保の 5 原則は [guidelines/ai-principles.md](guidelines/ai-principles.md)。
 
@@ -27,6 +28,7 @@
 | 4 突合 | `/ai-review traceability/specs/<機能>.yaml` | 設計書とコードの判定表（N1〜N6）を作る | RP4 最終確認 |
 | 5 CI + PR | `/ai-pr JOB0001` | 全ゲートを再実行し、PR 本文を下書き | RP5 PR |
 
+テスト仕様書が Excel であるときは、フェーズ 3 の前に `/ai-test-scaffold`（[tools/test-scaffold](tools/test-scaffold/README.md)）で雛形を作れます。
 今どこにいるか分からなくなったら `/ai-status`。運用中の障害調査には `/incident-investigate`。
 詳細と差し戻し・自動修正の止め方は [guidelines/workflow.md](guidelines/workflow.md)。
 
@@ -37,7 +39,7 @@
 ```bash
 git clone https://github.com/shoyo-maya-bot/ai-coding.git
 cd ai-coding
-python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt   # 検証ツールと、テスト・lint の道具（版は constraints.txt で固定）
+python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt   # 検証ツール・雛形ツールと、テスト・lint の道具（版は constraints.txt で固定）
 git config core.hooksPath .githooks        # push の前にドキュメントの検査（禁止事項の複写の一致など）を実行する
 ./scripts/verify-gates.sh --final          # Windows: .\scripts\verify-gates.ps1 -Final
 ```
@@ -62,7 +64,7 @@ ai-coding/
 ├── .github/
 │   ├── copilot-instructions.md   # 全体の約束（禁止事項・止め方）
 │   ├── agents/                   # planner / coder / tester / reviewer / orchestrator
-│   ├── prompts/                  # /ai-plan … /ai-pr、/ai-status、/incident-investigate
+│   ├── prompts/                  # /ai-plan … /ai-pr、/ai-test-scaffold、/ai-status、/incident-investigate
 │   ├── instructions/             # ファイルの種類ごとのルール（Java・テスト・Mapper）
 │   ├── skills/                   # 圧縮したドメイン知識（メッセージ ID・Mapper・バッチ）
 │   └── workflows/ci.yml          # D1〜D11
@@ -72,6 +74,7 @@ ai-coding/
 │   ├── specs/                    # 要件 ↔ 実装 ↔ テストの対応表（1 機能 1 ファイル）
 │   └── authority.yaml            # ルール ↔ チェックの対応表
 ├── tools/spec-trace/             # 対応表の検証ツール
+├── tools/test-scaffold/          # Excel のテスト仕様書 → JUnit 5 のテストの雛形
 ├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs、check_template_drift
 ├── samples/design-docs/          # 架空の設計書（Front Matter の id で参照）
 ├── samples/ci/                   # 設計書を別リポジトリに置くときの CI の例
@@ -131,6 +134,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10 | Excel のテスト仕様書から JUnit 5 のテストの雛形を作る [tools/test-scaffold](tools/test-scaffold/README.md) と `/ai-test-scaffold` を追加。verify-gates の tools tests でそのテストも実行し、constraints.txt に openpyxl を追加。spec-trace の `--test-results` は `@DisplayName` の付いたテストを表示名でも照合する（Gradle の結果ではテストの名前が表示名になり、これまで `trace.proof_not_run` になっていた） | 手元で verify-gates を流すには `python -m pip install -e "tools/test-scaffold[dev]" -c constraints.txt` も要る（README の手順は更新済み） |
 | 2026-10（第 5 回） | spec-trace: pin（`source_sha256`）の無い対応表は `--require proven`（`--final`・main）で error。spec-pin は pin の無い対応表の新規追加にも `spec-pin-approved` ラベルを求める。テスト結果はパッケージ付きのクラス名（Java は `package` 宣言、Python はファイルのパス）で照合する。D11 が `build.gradle` のゲートの弱体化（`qualityGate` からの除外・`ignoreFailures = true` など）と D4 の閾値の引き下げを検出。D4 の下限（80%）より低い `-PbranchCoverageMinimum` は Gradle が失敗する | pin の無い対応表は main で落ちる・新規追加の PR はラベルが要る。別のパッケージの同名のテストクラスの結果では proven にならない。D4 の閾値は上げられるが下げられない |
 | 2026-10（第 4 回） | spec-trace: 対応表の `source:` を必須に（スキーマ・`--enforce-drift`）、spec-pin は `source:` の削除・差し替えにもラベルを求める。パラメータ化テストの結果を引数名の並びでメソッドごとに対応づける（別のメソッドの成功を数えない）。シナリオだけで裏付けた要件は、シナリオの実行結果が無ければ未証明（`trace.proof_unverified`）。AssertJ の `assertThat(x)` だけ（終端の検証なし）はアサーションに数えない。template を写し元（dev-environment e5705d7）に合わせた（S3 から読むときも不正な UTF-8 で例外→終了コード 8）。devtools-common の固定を 6a263b8 に。eval の記録の手順と例、AI 利用の上限を追記 | `source:` の無い対応表・`assertThat(x)` だけのテスト・シナリオだけの proven は D7・D8・D10 で落ちる。同じクラスに引数名の並びが同じパラメータ化テストが 2 つあると照合できない（引数名か表示名を変える） |
 | 2026-10 | PR で設計書の承認ハッシュ（`source_sha256`）が変わったら `spec-pin-approved` ラベルを求める CI（spec-pin）を追加。spec-trace: アサーションの判定をライブラリの明示リストに（`toString` などを数えない）、`symbol` の無い proofs をエラーに（スキーマでも必須）、Feature 全体の `@ignore` とテキストブロックに対応。template を写し元（dev-environment 2002ca0）に合わせた（入力ファイルの大きさの上限 `app.batch.max-input-bytes`、DefaultFileFetcher・S3Config のテスト）。spec-trace の devtools-common の固定を cbe97d5 に | pin を変える PR は、承認した人がラベルを付けるまで spec-pin が赤になる。`toString()` などしか呼ばないテスト・`symbol` の無い proofs・Feature ごと `@ignore` したシナリオは D7・D10 で落ちる |

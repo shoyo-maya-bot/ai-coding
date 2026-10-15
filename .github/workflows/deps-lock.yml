@@ -1,7 +1,7 @@
 # 依存の版を固定する constraints.txt を作る（PyPI に届かない環境でも作れるよう、GitHub Actions に作らせる）.
 #
-# - main 以外のブランチで tools/spec-trace/pyproject.toml（またはこのファイル）を変えて push したとき、または手で動かしたときに走る
-# - pyproject.toml（dev を含む）と、scripts/ が使う pyyaml から、uv（版を固定）で Windows・Linux の両方に効く constraints.txt を作る
+# - main 以外のブランチで tools/*/pyproject.toml（またはこのファイル）を変えて push したとき、または手で動かしたときに走る
+# - tools/spec-trace・tools/test-scaffold の pyproject.toml（dev を含む）と、scripts/ が使う pyyaml から、uv（版を固定）で Windows・Linux の両方に効く constraints.txt を作る
 # - git の URL で入れる依存（devtools-common）は constraints に書けない（pip が受け付けない）ので除く. その版は pyproject.toml の SHA で固定済み
 # - 変わっていれば同じブランチにコミットして push する. GITHUB_TOKEN のコミットでは CI が走らないので、次の変更を push して CI を回す
 name: deps-lock
@@ -12,6 +12,7 @@ on:
     branches-ignore: [main]
     paths:
       - tools/spec-trace/pyproject.toml
+      - tools/test-scaffold/pyproject.toml
       - .github/workflows/deps-lock.yml
 
 permissions:
@@ -40,10 +41,10 @@ jobs:
       - name: constraints.txt を作る
         run: |
           echo "pyyaml" > "$RUNNER_TEMP/scripts.in"
-          uv pip compile tools/spec-trace/pyproject.toml "$RUNNER_TEMP/scripts.in" --extra dev \
+          uv pip compile tools/spec-trace/pyproject.toml tools/test-scaffold/pyproject.toml "$RUNNER_TEMP/scripts.in" --extra dev \
             --universal --python-version 3.10 --no-emit-package devtools-common \
             --no-header --no-annotate -o constraints.txt
-          sed -i '1i # 自動生成（.github/workflows/deps-lock.yml）. 手で書き換えない. python -m pip install -e "tools/spec-trace[dev]" pyyaml -c constraints.txt で使う' constraints.txt
+          sed -i '1i # 自動生成（.github/workflows/deps-lock.yml）. 手で書き換えない. python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt で使う' constraints.txt
           cat constraints.txt
       - name: 変わっていればコミットして push する
         run: |

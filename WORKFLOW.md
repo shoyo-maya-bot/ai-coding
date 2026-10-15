@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | 1 | `/ai-plan DOC-BATCH-JOB0001` | 生成ファイル一覧と対応表（全要件 pending）、確認事項 | **RP1**: 要件の漏れ・大きさ、確認事項。承認したら人が `spec-trace pin` | 確認事項が残る → 設計者に聞く。推測で埋めさせない |
 | 2 | `/ai-code traceability/specs/<機能>.yaml` | ソースを作り、D1・D2・D5・D9 を通す（自動修正は最大 3 回） | **RP2**: 層の責務、例外・メッセージ ID、SQL、トランザクション、除外の追加が無いか | 3 回で通らない・同じエラーが続く → AI が止まって人に戻す（下記） |
-| 3 | `/ai-test traceability/specs/<機能>.yaml` | 単体テスト・Karate を作り、対応表を proven に | **RP3**: 期待値が設計書由来か、異常系・境界値、アサーションが弱くないか | 分岐網羅（D4）が足りない → 理由を説明させる。閾値は下げない |
+| 3 | （テスト仕様書が Excel なら先に `/ai-test-scaffold`）`/ai-test traceability/specs/<機能>.yaml` | 単体テスト・Karate を作り、対応表を proven に | **RP3**: 期待値が設計書由来か、異常系・境界値、アサーションが弱くないか | 分岐網羅（D4）が足りない → 理由を説明させる。閾値は下げない |
 | 4 | `/ai-review traceability/specs/<機能>.yaml` | 設計書とコードの判定表（N1〜N6）。コードは直さない | **RP4**: NG・要確認を全部判断。設計書の誤りは修正依頼を起票 | NG → フェーズ 2 か 3 に差し戻す |
 | 5 | `/ai-pr JOB0001` | 全ゲート（D1〜D11）を再実行し、PR 本文を下書き | **RP5**: CI 全通過、PR 本文、変更範囲が計画どおり | CI の失敗 → 該当フェーズに戻る |
 
@@ -30,6 +30,23 @@
 ./scripts/verify-gates.sh            # Windows: .\scripts\verify-gates.ps1
 ./scripts/verify-gates.sh --final    # 完了時（全要件 proven を必須にする）
 ```
+
+## フェーズ 3 の下準備: テスト仕様書（Excel）から雛形を作る
+
+テスト仕様書が Excel であるときは、[tools/test-scaffold](tools/test-scaffold/README.md) でテストクラスの雛形を作ってから `/ai-test` に進めます
+（Copilot Chat なら `/ai-test-scaffold`）。LLM を使わないので、同じ仕様書からは同じ雛形ができます。
+
+```bash
+test-scaffold docs/会員テスト仕様書.xlsx --dry-run --strict --trace traceability/specs    # 作る予定と警告だけ見る
+test-scaffold docs/会員テスト仕様書.xlsx --merge --trace traceability/specs --proofs-out build/test-scaffold/proofs.yaml
+```
+
+| 見るもの | 意味・すること |
+|---|---|
+| 終了コード 2 | 仕様書・設定の誤り（見出し行が無い・設定の知らないキーなど）。何も書いていない。設定（`--config`）か仕様書を直す |
+| 警告「要件 ID がありません」「対応表にありません」 | その行のテストは対応表の要件に結び付かない。仕様書か対応表を直すか、RP1 の計画に戻る |
+| 「既にあるため作りませんでした」 | 既存のテストクラスは上書きしない。足りないメソッドだけ足すなら `--merge`（`--force` の上書きは人が決める） |
+| できたテストの `fail("未実装: …")` | 雛形のままでは D3 で落ちる。期待値は設計書から決めて検証を書く（`@Disabled` にしない）。通ったら `proofs.yaml` の候補を対応表に写す |
 
 ## AI が止まって人に戻ってきたとき
 

@@ -17,7 +17,7 @@ CI = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 # ゲート → 両方のスクリプトのそのゲートの部分に必ず含まれる文字列
 EXPECTED = {
     "java": ["-p template", "--continue", "qualityGate"],
-    "pytest": ["-m pytest", "tools/spec-trace/tests tests"],
+    "pytest": ["-m pytest", "tools/spec-trace/tests tools/test-scaffold/tests tests"],
     "ruff": ["ruff check tools scripts tests", "ruff format --check tools scripts tests"],
     "trace": ["spec_trace check traceability/specs", "--enforce-drift", "--require", "--test-results"],
     "authority": ["scripts/verify_authority.py"],

@@ -79,6 +79,7 @@ class TestResults:
         params: tuple[str, ...] | None = None,
         case: str | None = None,
         origin: Origin | None = None,
+        display: str | None = None,
     ) -> list[Case]:
         """クラス名とメソッド名に当たる結果（パラメータ化テストは全実行分）.
 
@@ -95,6 +96,9 @@ class TestResults:
           **引数名の並びがこのメソッドと同じ** 結果だけをこのメソッドの実行分とみなす
           （別のパラメータ化テストの成功を数えない。引数名の並びが同じメソッドが 2 つ以上あると区別できないので、
           どちらの実行分ともみなさない＝実行されていない扱い）
+        - display（JUnit 5 の @DisplayName の表示名. 同じクラスで一意なものだけ）があり、結果の名前にメソッド名が無い
+          （Gradle は @DisplayName の付いたテストの結果の名前を表示名にする）ときは、同じクラスの、名前が表示名と
+          一致する結果をこのメソッドの実行分とみなす
         """
         cases = [c for c in self.cases if origin is None or origin.matches(c.classname)]
         out = [c for c in cases if _method_name(c.name) == method]
@@ -111,6 +115,8 @@ class TestResults:
                 and _INVOCATION.match(c.name)
                 and invocation_params(c.name) == params
             ]
+        if not out and display and owner is not None and case is None:
+            out = [c for c in cases if _simple_class(c.classname) == owner and c.name == display]
         if case is not None:
             out = [c for c in out if _case_id(c.name) == case]
         return out
