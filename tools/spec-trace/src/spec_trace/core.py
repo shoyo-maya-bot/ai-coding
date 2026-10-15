@@ -23,7 +23,7 @@ from devtools_common.config import load_structured
 from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
-from .code import generated_test_params, lookup_scenario, lookup_symbol, split_case, split_symbol
+from .code import display_name, generated_test_params, lookup_scenario, lookup_symbol, split_case, split_symbol
 from .results import FAILED, SKIPPED, Case, Origin, TestResults, load_results
 
 log = get_logger(__name__)
@@ -318,7 +318,13 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
             )
         elif st.results() is not None:
             out += _check_result(
-                symbol, it["file"], loc, st, generated_test_params(path, symbol), Origin.of(path, it["file"])
+                symbol,
+                it["file"],
+                loc,
+                st,
+                generated_test_params(path, symbol),
+                Origin.of(path, it["file"]),
+                display_name(path, symbol),
             )
     return out
 
@@ -363,18 +369,25 @@ def _check_scenario_result(name: str, path: Path, file: str, loc: str, st: Setti
 
 
 def _check_result(
-    symbol: str, file: str, loc: str, st: Settings, params: tuple[str, ...] | None, origin: Origin | None = None
+    symbol: str,
+    file: str,
+    loc: str,
+    st: Settings,
+    params: tuple[str, ...] | None,
+    origin: Origin | None = None,
+    display: str | None = None,
 ) -> list[Finding]:
     """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる.
 
     params はパラメータ化テストの引数名（パラメータ化テストでなければ None）。
     origin はテストのソースの場所（パッケージ・モジュール）。結果の classname をこれで絞る。
+    display は JUnit 5 の @DisplayName の表示名（Gradle の結果ではテストの名前がこれになる）。
     """
     results = st.results()
     if results is None:
         return []
     owner, method = split_symbol(symbol)
-    cases = results.find(owner, method, params, split_case(symbol)[1], origin)
+    cases = results.find(owner, method, params, split_case(symbol)[1], origin, display)
     if not cases:
         seen = results.names_in_class(owner)
         hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"
@@ -389,7 +402,8 @@ def _check_result(
                 suggestion="テストを実行してから照合する。タグなどで除外されていないか確認する。"
                 "結果はパッケージ（Java は package 宣言、Python はファイルのパス）まで含めて照合する。"
                 "パラメータ化テストは、結果の名前が「[番号] 引数名 = 値, …」（JUnit の既定. -parameters でコンパイル）"
-                'か、メソッド名で始まる（@ParameterizedTest(name = "メソッド名 [{index}] …")）ことが要る',
+                'か、メソッド名で始まる（@ParameterizedTest(name = "メソッド名 [{index}] …")）ことが要る。'
+                "@DisplayName の表示名で照合するのは、表示名が文字列リテラルで、同じクラスで一意なときだけ",
             )
         ]
     return _outcome_findings(f"テスト {symbol}", cases, loc, "proofs.symbol")

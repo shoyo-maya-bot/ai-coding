@@ -19,7 +19,7 @@ from devtools_common.cli import run_main
 from devtools_common.report import report_schema
 
 from spec_trace import cli
-from spec_trace.code import is_generated_test, lookup_scenario, lookup_symbol, split_case, split_symbol
+from spec_trace.code import display_name, is_generated_test, lookup_scenario, lookup_symbol, split_case, split_symbol
 from spec_trace.core import sha256_of
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -464,6 +464,74 @@ class TestResultsTest(Base):
         rc, data = self.check("--test-results", str(self.results(junit=self.gradle9_parameterized(""))))
         self.assertEqual(rc, 1)
         self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def use_display_name(self, display: str = "1 取込済みの注文は登録しない") -> None:
+        self.edit(
+            "java/test/OrderImportJobTest.java",
+            "    @Test\n    void importOrders_skipsExisting()",
+            f'    @Test\n    @DisplayName("{display}")\n    void importOrders_skipsExisting()',
+        )
+
+    def junit_named(
+        self, name: str, body: str = "", classname: str = "com.example.batch.order.OrderImportJobTest"
+    ) -> str:
+        # Gradle の JUnit XML は、@DisplayName の付いたテストの結果の名前を表示名にする（メソッド名を出さない）
+        return JUNIT_OK.replace(
+            '<testcase name="importOrders_skipsExisting()" classname="com.example.batch.order.OrderImportJobTest"'
+            ' time="0.01"/>',
+            f'<testcase name="{name}" classname="{classname}" time="0.01">{body}</testcase>',
+        )
+
+    def test_display_name_results_are_matched(self):
+        # test-scaffold の雛形は @DisplayName（項番 + 観点）を付ける. 表示名の結果でも実行・成功を照合できる
+        self.use_display_name()
+        rc, data = self.check(
+            "--test-results", str(self.results(junit=self.junit_named("1 取込済みの注文は登録しない")))
+        )
+        self.assertEqual((rc, self.rules(data)), (0, []))
+        failed = self.junit_named("1 取込済みの注文は登録しない", '<failure message="未実装: 1"/>')
+        rc, data = self.check("--test-results", str(self.results(junit=failed)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_failed", self.rules(data))
+
+    def test_display_name_of_other_class_or_other_text_is_not_matched(self):
+        self.use_display_name()
+        for junit in (
+            self.junit_named("1 取込済みの注文は登録しない", classname="com.example.batch.order.OtherTest"),
+            self.junit_named("2 別のテスト"),
+        ):
+            rc, data = self.check("--test-results", str(self.results(junit=junit)))
+            self.assertEqual(rc, 1)
+            self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_duplicate_display_names_in_class_are_not_matched(self):
+        self.use_display_name("同じ表示名")
+        self.edit(
+            "java/test/OrderImportJobTest.java",
+            "\n}\n",
+            '\n\n    @Test\n    @DisplayName("同じ表示名")\n    void another() {\n'
+            "        assertThat(1).isEqualTo(1);\n    }\n}\n",
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=self.junit_named("同じ表示名"))))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_display_name_parsing(self):
+        java = self.tmp / "DTest.java"
+        java.write_text(
+            "class DTest {\n"
+            '    @Test\n    @DisplayName("a \\"q\\" " + "b\\\\u000a")\n    void concat() {\n    }\n\n'
+            '    @Test\n    @org.junit.jupiter.api.DisplayName("完全修飾")\n    void qualified() {\n    }\n\n'
+            "    @Test\n    @DisplayName(NAME)\n    void constant() {\n    }\n\n"
+            "    @Test\n    void plain() {\n    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(display_name(java, "DTest#concat"), 'a "q" b\\u000a')
+        self.assertEqual(display_name(java, "DTest#qualified"), "完全修飾")
+        self.assertIsNone(display_name(java, "DTest#constant"))  # 定数は読まない
+        self.assertIsNone(display_name(java, "DTest#plain"))
+        self.assertIsNone(display_name(self.proj / "src/order_import.py", "import_orders"))
 
     def test_is_generated_test_with_multiline_annotation(self):
         # template の OrderImportServiceTest#parseRejects と同じ形（複数行の @CsvSource、delimiter = '|' を含む）

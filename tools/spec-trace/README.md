@@ -53,6 +53,10 @@ spec-trace check traceability/specs --root . --require proven --test-results tem
     引数名を変えるか、`@ParameterizedTest(name = "メソッド名 [{index}] {arguments}")` のように表示名の先頭にメソッド名を入れる
   - 表示名に引数名が無い結果（`[1] a, b`. `-parameters` を付けずにコンパイルした・表示名を独自に付けた）は、どのメソッドの分か
     分からないので数えない
+- JUnit 5 の `@DisplayName("…")` が付いたテストは、Gradle の結果ではテストの名前がメソッド名ではなく表示名になる。
+  そのため、メソッド名の結果が無いときは、同じクラスの **表示名と一致する** 結果をそのメソッドの実行分とみなす
+  （test-scaffold の雛形も `@DisplayName` を付ける）。表示名が文字列リテラル（`+` での連結も可）でないもの（定数など）、
+  同じクラスに同じ表示名のメソッドが 2 つ以上あるものは、結果から区別できないので照合しない（`trace.proof_not_run`）
 - 結果のファイルが無い・XML として読めないときは、黙って通さず終了コード 2 にする
 - Karate などのシナリオ（`.feature`）は、Karate の JUnit XML（テスト名がシナリオ名. 先頭の `[1:5]` などの番号は外して比べる）が
   `--test-results` にあれば、失敗・スキップを照合する。結果が無いとき:

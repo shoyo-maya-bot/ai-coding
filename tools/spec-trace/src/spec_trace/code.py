@@ -291,6 +291,25 @@ def _param_names(params: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _decl_head(code: str, pos: int) -> int:
+    """メソッド名の位置から前へ戻り、直前のメンバーの終わり（かっこの外の ; { }）の位置を返す.
+
+    その次からメソッド名までが宣言の頭（アノテーション・修飾子・型）。
+    """
+    depth = 0
+    i = pos - 1
+    while i >= 0:
+        c = code[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            depth -= 1
+        elif c in ";{}" and depth == 0:
+            break
+        i -= 1
+    return i
+
+
 def _test_methods(code: str, start: int) -> list[tuple[str, int, bool, tuple[str, ...]]]:
     """start 以降のメソッドの宣言 → [(名前, 位置, パラメータ化テストか, 引数名)]."""
     out = []
@@ -314,18 +333,7 @@ def _test_methods(code: str, start: int) -> list[tuple[str, int, bool, tuple[str
         after = code[j + 1 :].lstrip()
         if not (after.startswith("{") or after.startswith("throws")):
             continue
-        # メソッド名から前へ戻り、直前のメンバーの終わり（かっこの外の ; { }）までを宣言の頭（アノテーション）とみなす
-        depth = 0
-        i = pos - 1
-        while i >= 0:
-            c = code[i]
-            if c == ")":
-                depth += 1
-            elif c == "(":
-                depth -= 1
-            elif c in ";{}" and depth == 0:
-                break
-            i -= 1
+        i = _decl_head(code, pos)
         generated = bool(_GENERATED_TEST.search(code[i + 1 : pos]))
         out.append((name, pos, generated, _param_names(code[open_at + 1 : j])))
     return out
@@ -360,6 +368,65 @@ def generated_test_params(path: Path, symbol: str) -> tuple[str, ...] | None:
     if any(mt[2] and mt[0] != name and mt[3] == mine[3] for mt in methods):
         return ()
     return mine[3]
+
+
+_DISPLAY_NAME = re.compile(r"@(?:org\.junit\.jupiter\.api\.)?DisplayName\s*\(")
+_JAVA_LITERAL = re.compile(r'"((?:\\.|[^"\\\n])*)"')
+_JAVA_ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", "s": " ", '"': '"', "'": "'", "\\": "\\"}
+
+
+def _unescape_java(text: str) -> str:
+    def one(m: re.Match[str]) -> str:
+        esc = m.group(1)
+        if esc.startswith("u"):
+            return chr(int(esc.lstrip("u"), 16))
+        if esc[0] in "01234567":
+            return chr(int(esc, 8))
+        return _JAVA_ESCAPES.get(esc, esc)
+
+    return re.sub(r"\\(u+[0-9a-fA-F]{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|.)", one, text)
+
+
+def _display_names(raw: str, code: str, start: int) -> dict[str, str | None]:
+    """クラスの各メソッドの @DisplayName("…") の文字列（無い・定数を使っていて読めないものは None）."""
+    out: dict[str, str | None] = {}
+    for name, pos, _, _ in _test_methods(code, start):
+        head_at = _decl_head(code, pos) + 1
+        m = _DISPLAY_NAME.search(code[head_at:pos])
+        if not m:
+            out.setdefault(name, None)
+            continue
+        open_at = head_at + m.end() - 1
+        close = _close_paren(code, open_at)
+        args_raw = raw[open_at + 1 : close] if close > 0 else ""
+        # 文字列リテラル（と + での連結）だけなら読む. 定数・テキストブロックは読まない
+        if close < 0 or code[open_at + 1 : close].replace("+", "").strip() or '"""' in args_raw:
+            out[name] = None
+            continue
+        out[name] = "".join(_unescape_java(x) for x in _JAVA_LITERAL.findall(args_raw))
+    return out
+
+
+def display_name(path: Path, symbol: str) -> str | None:
+    """JUnit 5 の @DisplayName("…") が付いたテストの表示名（無ければ None）.
+
+    Gradle の JUnit XML では、@DisplayName の付いたテストの結果の名前がメソッド名ではなく表示名になる
+    （test-scaffold の雛形もこれを付ける）。結果と照合するときに、表示名でもこのメソッドの結果を探せるようにする。
+    同じクラスに同じ表示名のメソッドが 2 つ以上あると結果から区別できないので None を返す（照合に使わない）。
+    """
+    if path.suffix == ".py":
+        return None
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    code = _strip_comments_and_strings(raw)
+    owner, name = split_symbol(symbol)
+    start = _class_start(code, owner)
+    if start is None:
+        return None
+    names = _display_names(raw, code, start)
+    mine = names.get(name)
+    if not mine or sum(1 for v in names.values() if v == mine) > 1:
+        return None
+    return mine
 
 
 def is_generated_test(path: Path, symbol: str) -> bool:
