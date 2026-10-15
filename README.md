@@ -87,7 +87,7 @@ ai-coding/
 | D2 | Checkstyle | D8 | 設計書ドリフト |
 | D3 | 単体テスト | D9 | Mapper XML の `${}` 禁止 |
 | D4 | 分岐網羅（Service・Job） | D10 | Karate シナリオの実在・有効性 |
-| D5 | SpotBugs | D11 | ルールとチェックの対応（越権・空文化の検出） |
+| D5 | SpotBugs | D11 | ルールとチェックの対応（越権・空文化の検出）と、ゲートの弱体化の検出 |
 | D6 | 実装の実在 | N1〜N6 | AI レビュー（設計書との突合。補助） |
 
 CI は `scripts/verify-gates.sh`（Linux）と `scripts\verify-gates.ps1`（Windows PowerShell 5.1）を呼ぶだけで、手元の verify-gates と同じ内容・同じ順に実行します
@@ -95,6 +95,18 @@ CI は `scripts/verify-gates.sh`（Linux）と `scripts\verify-gates.ps1`（Wind
 `proven` の要件は、テストが実在してアサーションがあるだけでなく、JUnit の結果 XML（`template/build/test-results/test`）で **実行されて成功した** ことも確かめます。
 D10 の Karate シナリオは CI では実行しません（起動中のアプリが要るため。存在・有効性・確認の有無だけを見ます）。
 ほかに `security` ジョブで bandit と pip-audit を流します。
+
+### 分岐網羅（D4）の閾値と目標
+
+- ガイドの **目標は 100%**（[guidelines/quality-gates.md](guidelines/quality-gates.md)）。ゲートで必須にしているのは **下限 80%**
+  （`template/build.gradle` の `branchCoverageFloor`）で、目標に向けて段階的に引き上げます
+- 引き上げは `-PbranchCoverageMinimum=0.9` などで試し、定着したら `branchCoverageFloor` と `scripts/verify_authority.py` の
+  `MIN_BRANCH_COVERAGE` を同じ PR で上げます
+- **下げることはできません**。`-PbranchCoverageMinimum`（`ORG_GRADLE_PROJECT_branchCoverageMinimum`・`gradle.properties` も）に
+  下限より低い値を渡すと Gradle が失敗し、D11（`verify_authority.py`）も下限・既定値の引き下げ、verify-gates・ワークフロー・
+  `gradle.properties`・実行時の環境変数での引き下げを error にします
+- D11 は同じく、`qualityGate` の `dependsOn` からゲート（`spotbugsMain` など）を外す、`ignoreFailures = true`、
+  `failOnViolation = false`、`maxWarnings` を 0 以外にする、ゲートのタスクを `enabled = false` にする、も検出します
 
 verify-gates の `docs` ゲートでは、ドキュメントと設定ファイルを検査します（`python scripts/check_docs.py`、ネットワーク不要）。
 
@@ -119,6 +131,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10（第 5 回） | spec-trace: pin（`source_sha256`）の無い対応表は `--require proven`（`--final`・main）で error。spec-pin は pin の無い対応表の新規追加にも `spec-pin-approved` ラベルを求める。テスト結果はパッケージ付きのクラス名（Java は `package` 宣言、Python はファイルのパス）で照合する。D11 が `build.gradle` のゲートの弱体化（`qualityGate` からの除外・`ignoreFailures = true` など）と D4 の閾値の引き下げを検出。D4 の下限（80%）より低い `-PbranchCoverageMinimum` は Gradle が失敗する | pin の無い対応表は main で落ちる・新規追加の PR はラベルが要る。別のパッケージの同名のテストクラスの結果では proven にならない。D4 の閾値は上げられるが下げられない |
 | 2026-10（第 4 回） | spec-trace: 対応表の `source:` を必須に（スキーマ・`--enforce-drift`）、spec-pin は `source:` の削除・差し替えにもラベルを求める。パラメータ化テストの結果を引数名の並びでメソッドごとに対応づける（別のメソッドの成功を数えない）。シナリオだけで裏付けた要件は、シナリオの実行結果が無ければ未証明（`trace.proof_unverified`）。AssertJ の `assertThat(x)` だけ（終端の検証なし）はアサーションに数えない。template を写し元（dev-environment e5705d7）に合わせた（S3 から読むときも不正な UTF-8 で例外→終了コード 8）。devtools-common の固定を 6a263b8 に。eval の記録の手順と例、AI 利用の上限を追記 | `source:` の無い対応表・`assertThat(x)` だけのテスト・シナリオだけの proven は D7・D8・D10 で落ちる。同じクラスに引数名の並びが同じパラメータ化テストが 2 つあると照合できない（引数名か表示名を変える） |
 | 2026-10 | PR で設計書の承認ハッシュ（`source_sha256`）が変わったら `spec-pin-approved` ラベルを求める CI（spec-pin）を追加。spec-trace: アサーションの判定をライブラリの明示リストに（`toString` などを数えない）、`symbol` の無い proofs をエラーに（スキーマでも必須）、Feature 全体の `@ignore` とテキストブロックに対応。template を写し元（dev-environment 2002ca0）に合わせた（入力ファイルの大きさの上限 `app.batch.max-input-bytes`、DefaultFileFetcher・S3Config のテスト）。spec-trace の devtools-common の固定を cbe97d5 に | pin を変える PR は、承認した人がラベルを付けるまで spec-pin が赤になる。`toString()` などしか呼ばないテスト・`symbol` の無い proofs・Feature ごと `@ignore` したシナリオは D7・D10 で落ちる |
 | 2026-10 | verify-gates.ps1 は `$env:PYTHON` → `python` の順で Python を選ぶ（`py` ランチャーを使わない）。手順は `python -m pip` | `py` だけで入れていた環境は、`python -m pip install …` で入れ直すか `$env:PYTHON` を指定する |

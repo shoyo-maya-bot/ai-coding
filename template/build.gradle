@@ -91,8 +91,16 @@ jacocoTestReport {
 }
 
 // D4 カバレッジ: 業務ロジック（Service とバッチ）の分岐網羅率。目標は 100%。段階的に引き上げる
+// 下限 branchCoverageFloor は下げない（../scripts/verify_authority.py（D11）が確かめる）。
+// -PbranchCoverageMinimum（ORG_GRADLE_PROJECT_branchCoverageMinimum・gradle.properties も同じ）で上げられるが、
+// 下限より低い値を渡すと失敗する（閾値を下げてゲートを通さない。guidelines/workflow.md の禁止事項）
 def coverageTargets = ['com/example/app/**/*Service.class', 'com/example/app/**/batch/*Job.class']
-def branchMinimum = (project.findProperty('branchCoverageMinimum') ?: '0.80') as BigDecimal
+def branchCoverageFloor = new BigDecimal('0.80')
+def branchMinimum = (project.findProperty('branchCoverageMinimum') ?: branchCoverageFloor.toPlainString()) as BigDecimal
+if (branchMinimum < branchCoverageFloor) {
+    throw new GradleException("branchCoverageMinimum=${branchMinimum} は下限 ${branchCoverageFloor} より低い値です。" +
+            '閾値を下げてゲートを通すことはできません（上げるのは可）')
+}
 jacocoTestCoverageVerification {
     dependsOn test
     classDirectories.setFrom(files(classDirectories.files.collect {

@@ -4,7 +4,8 @@
 `spec-trace pin` は人が設計書を承認したときに実行する操作（guidelines/workflow.md の「人だけが行うこと」）。
 エージェントや PR の作成者が pin を書き換えて trace.spec_drift を黙らせることを防ぐため、
 PR の変更前（base）と変更後（作業ツリー）の traceability/specs を比べ、source_sha256 が変わった・増えた・消えた
-対応表、または pin の対象の設計書（トップレベルの source:）を消した・差し替えた対応表があれば、
+対応表、pin の無いまま新しく足した対応表、または pin の対象の設計書（トップレベルの source:）を消した・差し替えた
+対応表があれば、
 PR に `spec-pin-approved` ラベルが付いていることを求める（ラベルは設計書を承認した人が付ける）。
 source を消すと spec-trace はドリフトを検知できなくなり、別の設計書に差し替えると pin の意味が変わるため、
 pin と同じ扱いにする。
@@ -87,6 +88,7 @@ def pin_changes(before: dict[str, Pin], after: dict[str, Pin]) -> list[str]:
     """pin（と pin の対象の設計書 source）が変わった対応表の説明（変わっていなければ空）.
 
     新しい対応表に pin がある・pin のある対応表を消した、も変更とみなす。
+    pin の無い対応表を新しく足した、も承認が要る変更とみなす（承認されていない設計書を根拠に要件を進めないため）。
     source の行を消した・別の設計書に差し替えた、も変更とみなす（ドリフトの検知が外れる・pin の意味が変わる）。
     """
     changes = []
@@ -100,6 +102,9 @@ def pin_changes(before: dict[str, Pin], after: dict[str, Pin]) -> list[str]:
                 changes.append(f"{path}: 設計書（source）を記録（{new_src}）")
             else:
                 changes.append(f"{path}: 設計書（source）を変更（{old_src} → {new_src}）")
+        if path not in before and new is None:
+            changes.append(f"{path}: pin なしで追加（設計書の承認が未記録. 承認して pin するか、承認済みならラベル）")
+            continue
         if old == new:
             continue
         if path not in before:

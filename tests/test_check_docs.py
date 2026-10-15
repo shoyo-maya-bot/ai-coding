@@ -64,7 +64,7 @@ class CheckDocsTest(unittest.TestCase):
         self.assertEqual(check_docs.verify(ROOT), [])
 
     def test_agent_command_with_ampersands_is_reported(self):
-        # 採点で見つかった書き方: Windows PowerShell 5.1 は && を解釈できず、エージェントの自動修正ループが最初で止まる
+        # 起きうる書き方: Windows PowerShell 5.1 は && を解釈できず、エージェントの自動修正ループが最初で止まる
         self.write(
             ".github/agents/coder.agent.md",
             "---\ndescription: x\n---\n\n1. `cd template && ./gradlew test` を実行する\n"

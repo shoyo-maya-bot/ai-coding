@@ -24,7 +24,7 @@ from devtools_common.log import get_logger
 from devtools_common.report import Finding, Severity
 
 from .code import generated_test_params, lookup_scenario, lookup_symbol, split_case, split_symbol
-from .results import FAILED, SKIPPED, Case, TestResults, load_results
+from .results import FAILED, SKIPPED, Case, Origin, TestResults, load_results
 
 log = get_logger(__name__)
 
@@ -130,14 +130,18 @@ def _check_drift(spec: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
         ]
     pinned = spec.get("source_sha256")
     if not pinned:
+        # 完了時（--require proven = verify-gates --final・main）は、承認（pin）の無い設計書を根拠に「テスト済み」と
+        # しない。途中段階（implemented まで）は警告にとどめる
+        final = st.require == "proven"
         return [
             Finding(
                 "trace.source_unpinned",
-                Severity.WARNING,
-                "設計書のハッシュが未記録です（設計書が変わっても検知できません）",
+                Severity.ERROR if final else Severity.WARNING,
+                "設計書のハッシュが未記録です（設計書が変わっても検知できません）"
+                + ("。完了時（--require proven）は承認（pin）が必要です" if final else ""),
                 location=loc,
                 field="source_sha256",
-                suggestion=f"承認後に spec-trace pin {loc} で記録する",
+                suggestion=f"設計書を承認した人が spec-trace pin {loc} で記録する（PR には spec-pin-approved ラベル）",
             )
         ]
     current = sha256_of(path)
@@ -313,7 +317,9 @@ def _check_proofs(req: dict[str, Any], loc: str, st: Settings) -> list[Finding]:
                 )
             )
         elif st.results() is not None:
-            out += _check_result(symbol, it["file"], loc, st, generated_test_params(path, symbol))
+            out += _check_result(
+                symbol, it["file"], loc, st, generated_test_params(path, symbol), Origin.of(path, it["file"])
+            )
     return out
 
 
@@ -356,16 +362,19 @@ def _check_scenario_result(name: str, path: Path, file: str, loc: str, st: Setti
     ]
 
 
-def _check_result(symbol: str, file: str, loc: str, st: Settings, params: tuple[str, ...] | None) -> list[Finding]:
+def _check_result(
+    symbol: str, file: str, loc: str, st: Settings, params: tuple[str, ...] | None, origin: Origin | None = None
+) -> list[Finding]:
     """--test-results が指定されていれば、そのテストが実行されて成功したかを確かめる.
 
     params はパラメータ化テストの引数名（パラメータ化テストでなければ None）。
+    origin はテストのソースの場所（パッケージ・モジュール）。結果の classname をこれで絞る。
     """
     results = st.results()
     if results is None:
         return []
     owner, method = split_symbol(symbol)
-    cases = results.find(owner, method, params, split_case(symbol)[1])
+    cases = results.find(owner, method, params, split_case(symbol)[1], origin)
     if not cases:
         seen = results.names_in_class(owner)
         hint = f"（このクラスの結果にある名前: {', '.join(seen)}）" if seen else "（このクラスの結果がありません）"
@@ -378,6 +387,7 @@ def _check_result(symbol: str, file: str, loc: str, st: Settings, params: tuple[
                 field="proofs.symbol",
                 actual=f"{file} {symbol}",
                 suggestion="テストを実行してから照合する。タグなどで除外されていないか確認する。"
+                "結果はパッケージ（Java は package 宣言、Python はファイルのパス）まで含めて照合する。"
                 "パラメータ化テストは、結果の名前が「[番号] 引数名 = 値, …」（JUnit の既定. -parameters でコンパイル）"
                 'か、メソッド名で始まる（@ParameterizedTest(name = "メソッド名 [{index}] …")）ことが要る',
             )

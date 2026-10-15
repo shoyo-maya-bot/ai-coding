@@ -171,6 +171,36 @@ class DriftTest(Base):
         self.assertEqual(lines[i + 1], f'source_sha256: "{sha256_of(self.proj / "docs/design/order-import.md")}"')
 
 
+class UnpinnedSpecTest(Base):
+    """pin（source_sha256）の無い対応表は、完了時（--require proven = verify-gates --final）には通さない."""
+
+    def unpin(self) -> None:
+        p = self.proj / SPEC
+        kept = [ln for ln in p.read_text(encoding="utf-8").splitlines() if not ln.startswith("source_sha256:")]
+        p.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    def severity(self, data: dict, rule: str) -> str:
+        return [f["severity"] for f in data["findings"] if f["rule_id"] == rule][0]
+
+    def test_unpinned_is_warning_in_progress(self):
+        self.unpin()
+        rc, data = self.check("--require", "implemented", "--enforce-drift")
+        self.assertEqual((rc, self.rules(data)), (0, ["trace.source_unpinned"]))
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "warning")
+
+    def test_unpinned_is_error_when_proven_is_required(self):
+        self.unpin()
+        rc, data = self.check("--require", "proven", "--enforce-drift")
+        self.assertEqual((rc, self.rules(data)), (1, ["trace.source_unpinned"]))
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "error")
+
+    def test_unpinned_is_error_with_proven_even_without_enforce_drift(self):
+        self.unpin()
+        rc, data = self.check("--require", "proven")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.severity(data, "trace.source_unpinned"), "error")
+
+
 class SpecFileTest(Base):
     def test_schema_error_is_usage_error(self):
         self.edit(SPEC, 'status: "proven"', 'status: "done"')
@@ -352,7 +382,7 @@ class TestResultsTest(Base):
         self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_assertion_exists_but_test_failed(self):
-        # 採点で見つかった穴: アサーションがあれば proven になり、テストが落ちていても気づけない
+        # 以前の穴: アサーションがあれば proven になり、テストが落ちていても気づけない
         failed = JUNIT_OK.replace(
             'time="0.01"/>',
             'time="0.01"><failure message="expected 0 but was 1">AssertionError</failure></testcase>',
@@ -508,6 +538,51 @@ class TestResultsTest(Base):
         rc, data = self.check("--test-results", str(self.results(pytest=junit)))
         self.assertEqual((rc, self.rules(data)), (0, []))
 
+    def test_same_simple_class_name_in_other_package_is_not_counted(self):
+        # 別のパッケージの同名のテストクラス（com.example.other.OrderImportJobTest）の成功を、
+        # 対応表のテスト（package com.example.batch.order）の成功とみなさない
+        junit = JUNIT_OK.replace("com.example.batch.order.OrderImportJobTest", "com.example.other.OrderImportJobTest")
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+        f = [f for f in data["findings"] if f["rule_id"] == "trace.proof_not_run"][0]
+        self.assertIn("com.example.other.OrderImportJobTest", f["message"])
+
+    def test_other_package_failure_does_not_fail_this_test(self):
+        junit = JUNIT_OK.replace(
+            "</testsuite>",
+            '<testcase name="importOrders_skipsExisting()" classname="com.example.other.OrderImportJobTest">'
+            '<failure message="other package"/></testcase></testsuite>',
+        )
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_java_default_package_matches_only_unqualified_classname(self):
+        self.edit("java/test/OrderImportJobTest.java", "package com.example.batch.order;", "")
+        rc, data = self.check("--test-results", str(self.results()))
+        self.assertIn("trace.proof_not_run", self.rules(data))
+        junit = JUNIT_OK.replace("com.example.batch.order.OrderImportJobTest", "OrderImportJobTest")
+        rc, data = self.check("--test-results", str(self.results(junit=junit)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_python_same_class_in_other_module_is_not_counted(self):
+        pytest = PYTEST_OK.replace("tests.test_order_import.TestOrderValidator", "tests.test_other.TestOrderValidator")
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_python_module_function_in_other_module_is_not_counted(self):
+        pytest = PYTEST_OK.replace('"tests.test_order_import" name=', '"tests.test_other" name=')
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+
+    def test_python_rootdir_prefix_difference_is_tolerated(self):
+        # pytest の rootdir が上の階層だと classname の先頭が増える（project.tests.test_order_import…）
+        pytest = PYTEST_OK.replace('classname="tests.', 'classname="project.tests.')
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
     def test_java_parameterized_case_id(self):
         self.use_parameterized_test()
         self.edit("traceability/order-import.yaml", "OrderImportJobTest#other", "OrderImportJobTest#other[2]")
@@ -572,7 +647,9 @@ class SourceRequiredTest(Base):
 
 # --- パラメータ化テストの結果は、メソッドごとに厳密に対応づける ---
 
-TWO_PARAMETERIZED = """class PTest {
+TWO_PARAMETERIZED = """package com.example;
+
+class PTest {
     @ParameterizedTest
     @CsvSource({"a, b", "c, d"})
     void parseRejects(String line, String message) {

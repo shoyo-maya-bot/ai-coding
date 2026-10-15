@@ -1,6 +1,6 @@
 """scripts/verify-gates.sh / .ps1 と CI がずれていないかのテスト.
 
-採点で見つかった食い違い: verify-gates は「CI と同じゲートを同じ順で」と書きながら、既定で --require を付けず、
+以前あった食い違い: verify-gates は「CI と同じゲートを同じ順で」と書きながら、既定で --require を付けず、
 pytest・ruff・template-drift を実行していなかった. いまは CI がこのスクリプトを呼ぶので、
 ここでは sh と ps1 の中身（ゲートの順番と、各ゲートが呼ぶもの）がそろっていることと、CI が両方を呼ぶことを確かめる.
 """
