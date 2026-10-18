@@ -254,6 +254,21 @@ class CodeLookupTest(unittest.TestCase):
         self.assertEqual(split_symbol("TestX::test_y"), ("TestX", "test_y"))
         self.assertEqual(split_symbol("f"), (None, "f"))
 
+    def test_multiline_call_is_not_a_declaration(self):
+        # 以前の穴: 行頭から始まる複数行の呼び出し（t(\n x);）を宣言とみなし、
+        # 本体が無い＝アサーション数 -1 で D7 を素通りしていた
+        p = self.write(
+            "M.java",
+            "class M {\n  void helper() {\n    t(\n        1);\n  }\n  @Test\n  void t(int x) {\n    run(x);\n  }\n}\n",
+        )
+        self.assertEqual(lookup_symbol(p, "M#t").asserts, 0)  # 本物の宣言（アサーション 0）を見つける
+        only_call = self.write("N.java", "class N {\n  void helper() {\n    t(\n        1);\n  }\n}\n")
+        self.assertFalse(lookup_symbol(only_call, "N#t").found)  # 呼び出ししか無ければ見つからない
+        decl = self.write("K.kt", "class K {\n  @Test\n  fun t(\n      x: Int\n  ) {\n    assertEquals(1, x)\n  }\n}\n")
+        self.assertEqual(lookup_symbol(decl, "K#t").asserts, 1)  # 複数行の引数の宣言は従来どおり
+        ctor = self.write("C.java", "class C {\n  C(\n      int x) {\n  }\n}\n")
+        self.assertTrue(lookup_symbol(ctor, "C#C").found)
+
     def test_java_call_is_not_a_declaration(self):
         p = self.write("A.java", "class A {\n  void run() {\n    process(x);\n  }\n}\n")
         self.assertFalse(lookup_symbol(p, "A#process").found)
@@ -649,6 +664,26 @@ class TestResultsTest(Base):
         # pytest の rootdir が上の階層だと classname の先頭が増える（project.tests.test_order_import…）
         pytest = PYTEST_OK.replace('classname="tests.', 'classname="project.tests.')
         rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+
+    def test_python_file_name_only_match_requires_unique_file(self):
+        # pytest の rootdir が tests/ だと classname はファイル名だけ（test_order_import）.
+        # 同名のファイルが 1 つなら照合する
+        pytest = PYTEST_OK.replace('classname="tests.', 'classname="')
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual((rc, self.rules(data)), (0, []))
+        # 以前の穴: 末尾 1 要素（ファイル名）の一致だけで、
+        # 別のフォルダの同名のテスト（e2e/test_order_import.py）の結果を数えていた
+        other = self.proj / "e2e" / "test_order_import.py"
+        other.write_text("def test_import_is_idempotent():\n    assert True\n", encoding="utf-8")
+        from spec_trace import results as results_mod
+
+        results_mod._same_name_files.cache_clear()
+        rc, data = self.check("--test-results", str(self.results(pytest=pytest)))
+        self.assertEqual(rc, 1)
+        self.assertIn("trace.proof_not_run", self.rules(data))
+        # フォルダまで一致する classname なら、同名のファイルがあっても照合する
+        rc, data = self.check("--test-results", str(self.results()))
         self.assertEqual((rc, self.rules(data)), (0, []))
 
     def test_java_parameterized_case_id(self):
