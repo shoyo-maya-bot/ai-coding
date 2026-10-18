@@ -9,9 +9,14 @@
 - template/build.gradle でゲートが弱められていない（チェックは実在しても、効いていなければ空文化と同じ）
   - qualityGate の dependsOn から、authority.yaml の Gradle のゲート（compileJava・spotbugsMain など）が外れていない
   - ignoreFailures = true・failOnViolation = false・maxWarnings が 0 以外・ゲートのタスクの enabled = false が無い
+    （`= true` のほか `.set(true)`・`(true)`・`setIgnoreFailures(true)`・`X.enabled = false`・`onlyIf { false }`・
+    `tasks.withType(Test) { enabled = false }` も見る）
+  - test タスクでテストを除外・絞り込んでいない（exclude・excludeTestsMatching・karate 以外の excludeTags・include 系）
   - D4 の分岐網羅率の下限（branchCoverageFloor）が MIN_BRANCH_COVERAGE 以上で、-P 等で下限より下げると失敗する作りのまま
+  - D4 の対象（coverageTargets）から REQUIRED_COVERAGE_TARGETS が外れていない・検証から除外（excludes）していない
 - D4 の閾値を外から下げていない（gradle.properties・verify-gates・ワークフローの -PbranchCoverageMinimum /
   ORG_GRADLE_PROJECT_branchCoverageMinimum、この実行の環境変数）
+- verify-gates・ワークフローで、ゲートのタスクを -x / --exclude-task で外していない
 
 終了コード: 0 問題なし / 1 問題あり
 """
@@ -52,7 +57,22 @@ COVERAGE_WIRING = (
     " as BigDecimal",
     "if (branchMinimum < branchCoverageFloor) {",
     "minimum = branchMinimum",
+    "includes: coverageTargets",
 )
+# D4 の対象（業務ロジック）. 足すのは自由だが、外す（対象を狭めて網羅率を上げる）のはゲートのこじ開け
+REQUIRED_COVERAGE_TARGETS = ("com/example/app/**/*Service.class", "com/example/app/**/batch/*Job.class")
+WEAK = "ゲートの弱体化: template/build.gradle"  # 指摘の先頭
+# test タスクで除外してよいタグ（Karate は karateTest タスクで別に実行する）
+ALLOWED_EXCLUDE_TAGS = {"karate"}
+# tasks.withType(…) の型 → その型のゲートのタスク
+TASK_TYPES = {
+    "Test": {"test"},
+    "JavaCompile": {"compileJava"},
+    "Checkstyle": {"checkstyleMain", "checkstyleTest"},
+    "SpotBugsTask": {"spotbugsMain"},
+    "JacocoCoverageVerification": {"jacocoTestCoverageVerification"},
+}
+_SET = r"\s*(?:=|\.(?:set|convention)\s*\(|\(|)\s*"  # `x = v`・`x v`・`x(v)`・`x.set(v)`・`x.convention(v)`
 
 
 def _squash(text: str) -> str:
@@ -82,6 +102,96 @@ def _quality_gate_deps(build: str) -> set[str] | None:
     return deps
 
 
+def _blocks(code: str, header: str) -> list[tuple[int, str]]:
+    """header（正規表現. 末尾の { を含む）で始まるブロック → [(位置, 中身)]."""
+    out = []
+    for m in re.finditer(header, code):
+        depth, i = 1, m.end()
+        while i < len(code) and depth:
+            depth += {"{": 1, "}": -1}.get(code[i], 0)
+            i += 1
+        out.append((m.start(), code[m.end() : i - 1]))
+    return out
+
+
+def _line(code: str, pos: int) -> int:
+    return code.count("\n", 0, pos) + 1
+
+
+def _owner_tasks(code: str, pos: int) -> set[str]:
+    """pos の設定（enabled = false など）がどのタスクのものか. `X.enabled` の X か、囲むブロックの見出しから決める."""
+    before = code[:pos]
+    m = re.search(
+        r"(?:tasks\s*\.\s*(?:named|getByName)\(\s*['\"](\w+)['\"]\s*\)|(?:tasks\s*\.\s*)?(\w+))\s*\.\s*$", before
+    )
+    if m:
+        return {m.group(1) or m.group(2)}
+    depth, i = 0, pos - 1
+    while i >= 0:  # 囲む { を探す
+        depth += {"}": 1, "{": -1}.get(code[i], 0)
+        if depth < 0:
+            break
+        i -= 1
+    if i < 0:
+        return set()
+    head = code[max(code.rfind("\n", 0, i), code.rfind(";", 0, i), code.rfind("}", 0, i)) + 1 : i].strip()
+    if m := re.search(r"tasks\s*\.\s*(?:named|getByName)\(\s*['\"](\w+)['\"]", head):
+        return {m.group(1)}
+    if m := re.search(r"withType\(\s*(?:[\w.]+\.)?(\w+)\s*\)", head):
+        return TASK_TYPES.get(m.group(1), set())
+    if m := re.fullmatch(r"(?:tasks\s*\.\s*)?(\w+)", head):
+        return {m.group(1)}
+    return set()
+
+
+def _test_task_blocks(code: str) -> list[tuple[int, str]]:
+    """test タスクの設定ブロック（tasks.named('test') { }・test { }・tasks.withType(Test) { }）."""
+    return (
+        _blocks(code, r"tasks\s*\.\s*(?:named|getByName)\(\s*['\"]test['\"]\s*\)\s*\{")
+        + _blocks(code, r"(?m)^\s*(?:tasks\s*\.\s*)?test\s*\{")
+        + _blocks(code, r"tasks\s*\.\s*withType\(\s*Test\s*\)\s*(?:\.configureEach\s*)?\{")
+    )
+
+
+def check_test_filters(code: str) -> list[str]:
+    """test タスクでテストを除外・絞り込んでいないか（除外したテストは D3・D4 に効かない）."""
+    errors: list[str] = []
+    for start, block in _test_task_blocks(code):
+        line = _line(code, start)
+        for m in re.finditer(
+            r"\b(exclude|excludes|setExcludes|excludeTestsMatching|include|includes|setIncludes|includeTestsMatching|includeTags)\b",
+            block,
+        ):
+            errors.append(f"{WEAK}:{line}: test タスクで {m.group(1)}（テストを除外・絞り込むと D3・D4 に効かない）")
+        for m in re.finditer(r"\bexcludeTags\b([^\n]*)", block):
+            tags = set(re.findall(r"['\"]([^'\"]+)['\"]", m.group(1)))
+            extra = sorted(tags - ALLOWED_EXCLUDE_TAGS)
+            if extra or not tags:
+                errors.append(
+                    f"{WEAK}:{line}: test タスクで excludeTags {', '.join(extra) or m.group(1).strip()}"
+                    f"（除外してよいのは {', '.join(sorted(ALLOWED_EXCLUDE_TAGS))} だけ）"
+                )
+        if re.search(r"\bfailOnNoMatchingTests" + _SET + "false", block):
+            errors.append(f"{WEAK}:{line}: test タスクで failOnNoMatchingTests = false")
+    return errors
+
+
+def check_coverage_targets(code: str) -> list[str]:
+    """D4 の対象（coverageTargets）を狭めていないか・検証から除外していないか."""
+    errors: list[str] = []
+    m = re.search(r"def\s+coverageTargets\s*=\s*\[([^\]]*)\]", code)
+    targets = set(re.findall(r"['\"]([^'\"]+)['\"]", m.group(1))) if m else set()
+    for t in REQUIRED_COVERAGE_TARGETS:
+        if t not in targets:
+            errors.append(f"{WEAK} の D4 の対象 coverageTargets に {t} がありません（対象を狭めない）")
+    for start, block in _blocks(code, r"jacocoTestCoverageVerification\s*\{"):
+        for x in re.finditer(r"\b(excludes?|setExcludes)\b", block):
+            errors.append(
+                f"{WEAK}:{_line(code, start)}: jacocoTestCoverageVerification で {x.group(1)}（D4 の対象から外さない）"
+            )
+    return errors
+
+
 def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
     """template/build.gradle でゲートが弱められていないか（D11. チェックが実在しても効いていなければ空文化と同じ）."""
     errors: list[str] = []
@@ -95,19 +205,20 @@ def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
         for t in sorted(gradle_tasks - deps):
             errors.append(f"ゲートの弱体化: qualityGate の dependsOn に {t} がありません（そのゲートが実行されない）")
 
-    for m in re.finditer(r"\bignoreFailures\s*(?:=\s*)?(true)\b", code):
-        line = code.count("\n", 0, m.start()) + 1
-        errors.append(f"ゲートの弱体化: template/build.gradle:{line}: ignoreFailures = true（失敗しても通る）")
-    for m in re.finditer(r"\bfailOnViolation\s*(?:=\s*)?(false)\b", code):
-        line = code.count("\n", 0, m.start()) + 1
-        errors.append(f"ゲートの弱体化: template/build.gradle:{line}: failOnViolation = false（不足でも通る）")
-    for m in re.finditer(r"\bmaxWarnings\s*(?:=\s*)?(\d+)", code):
+    for m in re.finditer(r"\b(?:ignoreFailures|setIgnoreFailures)" + _SET + r"(true)\b", code):
+        errors.append(f"{WEAK}:{_line(code, m.start())}: ignoreFailures = true（失敗しても通る）")
+    for m in re.finditer(r"\b(?:failOnViolation|setFailOnViolation)" + _SET + r"(false)\b", code):
+        errors.append(f"{WEAK}:{_line(code, m.start())}: failOnViolation = false（不足でも通る）")
+    for m in re.finditer(r"\b(?:maxWarnings|setMaxWarnings)" + _SET + r"(\d+)", code):
         if int(m.group(1)) != 0:
-            line = code.count("\n", 0, m.start()) + 1
-            errors.append(f"ゲートの弱体化: template/build.gradle:{line}: maxWarnings = {m.group(1)}（0 にする）")
-    for m in re.finditer(r"tasks\.named\(\s*'(\w+)'\s*\)\s*\{[^{}]*\benabled\s*=\s*false", code):
-        if m.group(1) in gradle_tasks:
-            errors.append(f"ゲートの弱体化: template/build.gradle: {m.group(1)} が enabled = false（実行されない）")
+            errors.append(f"{WEAK}:{_line(code, m.start())}: maxWarnings = {m.group(1)}（0 にする）")
+    for m in re.finditer(r"\b(?:enabled|setEnabled)" + _SET + r"false\b|\bonlyIf\s*\{\s*false\s*\}", code):
+        for t in sorted(_owner_tasks(code, m.start()) & gradle_tasks):
+            errors.append(
+                f"{WEAK}:{_line(code, m.start())}: {t} が無効（enabled = false・onlyIf {{ false }}。実行されない）"
+            )
+    errors += check_test_filters(code)
+    errors += check_coverage_targets(code)
 
     floor_m = re.search(r"def\s+branchCoverageFloor\s*=\s*new\s+BigDecimal\(\s*'([^']*)'\s*\)", code)
     floor = _decimal(floor_m.group(1)) if floor_m else None
@@ -123,8 +234,35 @@ def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
     flat = _squash(code)
     for snippet in COVERAGE_WIRING:
         if _squash(snippet) not in flat:
-            errors.append(f"ゲートの弱体化: template/build.gradle の D4 に「{snippet}」がありません（下げられる）")
-    return errors + check_coverage_overrides(root, floor or MIN_BRANCH_COVERAGE)
+            errors.append(f"{WEAK} の D4 に「{snippet}」がありません（下げられる）")
+    return (
+        errors + check_coverage_overrides(root, floor or MIN_BRANCH_COVERAGE) + check_excluded_tasks(root, gradle_tasks)
+    )
+
+
+_EXCLUDE_TASK = re.compile(r"(?:^|\s)(?:-x|--exclude-task)[\s=]+['\"]?:?(\w+)", re.M)
+
+
+def _gate_runner_files(root: Path) -> list[Path]:
+    files = [root / "scripts/verify-gates.sh", root / "scripts/verify-gates.ps1"]
+    wf = root / ".github/workflows"
+    if wf.is_dir():
+        files += sorted(p for p in wf.iterdir() if p.suffix in (".yml", ".yaml"))
+    return [f for f in files if f.is_file()]
+
+
+def check_excluded_tasks(root: Path, gradle_tasks: set[str]) -> list[str]:
+    """ゲートを実行する経路（verify-gates・ワークフロー）で、ゲートのタスクを -x で外していないか."""
+    errors: list[str] = []
+    for f in _gate_runner_files(root):
+        text = f.read_text(encoding="utf-8")
+        for m in _EXCLUDE_TASK.finditer(text):
+            if m.group(1) in gradle_tasks | {"qualityGate", "check"}:
+                errors.append(
+                    f"ゲートの弱体化: {f.relative_to(root).as_posix()}:{_line(text, m.start())}: -x {m.group(1)}"
+                    "（そのゲートが実行されない）"
+                )
+    return errors
 
 
 _OVERRIDE = re.compile(
@@ -135,10 +273,7 @@ _OVERRIDE = re.compile(
 def check_coverage_overrides(root: Path, floor: Decimal) -> list[str]:
     """D4 の閾値を下限より下げる指定が、ゲートを実行する経路（設定・スクリプト・CI・この実行の環境）に無いか."""
     errors: list[str] = []
-    files = [root / "template/gradle.properties", root / "scripts/verify-gates.sh", root / "scripts/verify-gates.ps1"]
-    wf = root / ".github/workflows"
-    if wf.is_dir():
-        files += sorted(p for p in wf.iterdir() if p.suffix in (".yml", ".yaml"))
+    files = [root / "template/gradle.properties", *_gate_runner_files(root)]
     for f in files:
         if not f.is_file():
             continue

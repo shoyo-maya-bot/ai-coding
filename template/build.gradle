@@ -117,12 +117,15 @@ jacocoTestCoverageVerification {
     }
 }
 
-// D9 SQL の安全性: Mapper XML で ${} による文字列埋め込みを禁止（SQL インジェクション対策。#{} を使う）
+// D9 SQL の安全性: Mapper XML と Mapper インターフェースの SQL アノテーション（@Select・@Insert・@Update・@Delete）で
+// ${} による文字列埋め込みを禁止（SQL インジェクション対策。#{} を使う）。Spring の @Value("${…}") などアノテーション以外の文字列は見ない
+// （@SelectProvider など Java で SQL を組み立てるものは検査できないので、使うときはレビューで確かめる）
 tasks.register('verifyMapperSql') {
-    description = 'Mapper XML に ${...} が無いことを確かめる'
+    description = 'Mapper XML と MyBatis の SQL アノテーションに ${...} が無いことを確かめる'
     group = 'verification'
     def xmls = fileTree('src/main/resources/mapper') { include '**/*.xml' }
-    inputs.files(xmls)
+    def javas = fileTree('src/main/java') { include '**/*.java' }
+    inputs.files(xmls, javas)
     doLast {
         def bad = []
         xmls.each { f ->
@@ -132,8 +135,40 @@ tasks.register('verifyMapperSql') {
                 }
             }
         }
+        def annotation = java.util.regex.Pattern.compile('@(?:org\\.apache\\.ibatis\\.annotations\\.)?(Select|Insert|Update|Delete)\\s*\\(')
+        javas.each { f ->
+            def text = f.getText('UTF-8')
+            def m = annotation.matcher(text)
+            while (m.find()) {
+                // アノテーションの ( に対応する ) まで（文字列の中のかっこは数えない）
+                int depth = 1
+                int i = m.end()
+                boolean inString = false
+                while (i < text.length() && depth > 0) {
+                    char c = text.charAt(i)
+                    if (inString) {
+                        if (c == (char) '\\') {
+                            i++
+                        } else if (c == (char) '"') {
+                            inString = false
+                        }
+                    } else if (c == (char) '"') {
+                        inString = true
+                    } else if (c == (char) '(') {
+                        depth++
+                    } else if (c == (char) ')') {
+                        depth--
+                    }
+                    i++
+                }
+                if (text.substring(m.end(), i).contains('${')) {
+                    def line = text.substring(0, m.start()).count('\n') + 1
+                    bad << "${f.name}:${line}: @${m.group(1)}"
+                }
+            }
+        }
         if (bad) {
-            throw new GradleException("Mapper XML で \${} は使えません（#{} を使う）:\n" + bad.join('\n'))
+            throw new GradleException("Mapper の SQL で \${} は使えません（#{} を使う）:\n" + bad.join('\n'))
         }
     }
 }
