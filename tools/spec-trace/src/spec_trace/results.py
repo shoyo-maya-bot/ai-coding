@@ -6,6 +6,8 @@ proven の裏付けに「テストが実行されて成功した」ことを加�
 
 from __future__ import annotations
 
+import functools
+import os
 import re
 import xml.etree.ElementTree as ET  # nosec B405  # 自分のビルドが出したテスト結果だけを読む
 from dataclasses import dataclass, field
@@ -36,13 +38,17 @@ class Origin:
 
     - Java / Kotlin 等: ソースの package 宣言 + クラス名（com.example.a.FooTest）。入れ子のクラスは Outer$Inner
     - Python: ファイルのパス（拡張子なし）。pytest の classname（rootdir からの相対の「.」区切り）と、
-      短い方がもう一方の末尾に一致すること（rootdir の違いで先頭が増減しても照合できる）
+      短い方がもう一方の末尾に一致すること（rootdir の違いで先頭が増減しても照合できる）。
+      ただし一致が末尾の 1 つ（ファイル名）だけで、ソースがフォルダの中にあるときは、同じ名前のテストファイルが
+      プロジェクトにほかに無い場合だけ一致とみなす
+      （tests/unit/test_x.py の裏付けに tests/e2e/test_x.py の結果を使わない）
     - それ以外（TypeScript など）: None（従来どおり単純名で照合）
     """
 
     kind: str  # "jvm" / "python"
     package: str = ""  # jvm: パッケージ（無名パッケージは ""）
     module: tuple[str, ...] = ()  # python: ファイルのパスの各部（拡張子なし）
+    unique_name: bool = True  # python: 同じファイル名のテストファイルがプロジェクトにほかに無いか
 
     @classmethod
     def of(cls, path: Path, rel: str) -> Origin | None:
@@ -52,7 +58,13 @@ class Origin:
             return cls("jvm", package=re.sub(r"\s+", "", m.group(1)) if m else "")
         if path.suffix == ".py":
             parts = tuple(p for p in Path(rel).with_suffix("").parts if p not in (".", "..", "/", "\\"))
-            return cls("python", module=parts)
+            unique = True
+            if len(parts) > 1 and ".." not in Path(rel).parts:
+                root = path.resolve()
+                for _ in Path(rel).parts:
+                    root = root.parent
+                unique = _same_name_files(str(root), path.name) <= 1
+            return cls("python", module=parts, unique_name=unique)
         return None
 
     def matches(self, classname: str) -> bool:
@@ -64,7 +76,24 @@ class Origin:
         parts = tuple(classname.split("."))
         module = parts[:-1] if _in_class(classname) else parts
         n = min(len(module), len(self.module))
-        return n > 0 and module[-n:] == self.module[-n:]
+        if n == 0 or module[-n:] != self.module[-n:]:
+            return False
+        # ファイル名だけの一致（classname が test_x で、ソースが tests/unit/test_x.py）は、
+        # 同名のファイルがほかに無いときだけ
+        return n > 1 or len(self.module) == 1 or self.unique_name
+
+
+_SKIP_DIRS = {"node_modules", "site-packages", "build", "dist", "venv", "__pycache__"}
+
+
+@functools.lru_cache(maxsize=256)
+def _same_name_files(root: str, name: str) -> int:
+    """root の下にある name というファイルの数（隠しフォルダ・仮想環境・ビルドの出力は見ない）."""
+    count = 0
+    for _dir, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in _SKIP_DIRS]
+        count += files.count(name)
+    return count
 
 
 @dataclass

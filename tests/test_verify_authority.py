@@ -70,6 +70,87 @@ class GateStrengthTest(RepoCopy):
     def test_copy_is_clean(self):
         self.assertEqual(self.errors(), [])
 
+    # --- 第 6 回の指摘: = true 以外の書き方・テストの除外・D4 の対象の縮小・-x ---
+
+    def test_ignore_failures_set_true(self):
+        for form in (
+            "ignoreFailures.set(true)",
+            "ignoreFailures(true)",
+            "setIgnoreFailures(true)",
+            "ignoreFailures true",
+        ):
+            with self.subTest(form=form):
+                self.setUp()
+                self.edit("template/build.gradle", "    ignoreFailures = false\n}", f"    {form}\n}}")
+                self.assert_weakened("ignoreFailures")
+
+    def test_max_warnings_set(self):
+        self.edit("template/build.gradle", "maxWarnings = 0", "maxWarnings.set(10)")
+        self.assert_weakened("maxWarnings = 10")
+
+    def test_task_disabled_in_other_forms(self):
+        forms = {
+            "spotbugsMain.enabled = false": "spotbugsMain",
+            "tasks.spotbugsMain.enabled = false": "spotbugsMain",
+            "tasks.named('checkstyleMain') { enabled.set(false) }": "checkstyleMain",
+            "tasks.withType(Test) { enabled = false }": "test",
+            "tasks.named('verifyMapperSql') { onlyIf { false } }": "verifyMapperSql",
+        }
+        for form, task in forms.items():
+            with self.subTest(form=form):
+                self.setUp()
+                self.edit("template/build.gradle", "tasks.named('check') {", form + "\ntasks.named('check') {")
+                self.assert_weakened(task, "無効")
+
+    def test_spotbugs_test_may_stay_disabled(self):
+        self.assertNotIn("spotbugsTest", " ".join(self.errors()))  # spotbugsTest はゲートではない（雛形で無効のまま）
+
+    def test_test_task_excludes_tests(self):
+        forms = {
+            "exclude '**/*ServiceTest*'": "exclude",
+            "filter { excludeTestsMatching '*Order*' }": "excludeTestsMatching",
+            "filter { includeTestsMatching '*Member*' }": "includeTestsMatching",
+        }
+        for form, word in forms.items():
+            with self.subTest(form=form):
+                self.setUp()
+                self.edit(
+                    "template/build.gradle",
+                    "    finalizedBy jacocoTestReport\n",
+                    f"    {form}\n    finalizedBy jacocoTestReport\n",
+                )
+                self.assert_weakened("test タスク", word)
+
+    def test_test_task_excludes_other_tags(self):
+        self.edit(
+            "template/build.gradle",
+            "excludeTags 'karate'\n    }\n    finalizedBy",
+            "excludeTags 'karate', 'slow'\n    }\n    finalizedBy",
+        )
+        self.assert_weakened("excludeTags", "slow")
+
+    def test_coverage_targets_narrowed(self):
+        self.edit("template/build.gradle", ", 'com/example/app/**/batch/*Job.class'", "")
+        self.assert_weakened("coverageTargets", "batch/*Job.class")
+
+    def test_coverage_targets_not_used(self):
+        self.edit(
+            "template/build.gradle", "includes: coverageTargets", "includes: ['com/example/app/AppApplication.class']"
+        )
+        self.assert_weakened("includes: coverageTargets")
+
+    def test_coverage_verification_excludes(self):
+        self.edit(
+            "template/build.gradle",
+            "fileTree(dir: it, includes: coverageTargets)",
+            "fileTree(dir: it, includes: coverageTargets, excludes: ['**/OrderImportService.class'])",
+        )
+        self.assert_weakened("jacocoTestCoverageVerification", "excludes")
+
+    def test_gate_task_excluded_with_x(self):
+        (self.tmp / "scripts/verify-gates.sh").write_text("./gradlew qualityGate -x spotbugsMain\n", encoding="utf-8")
+        self.assert_weakened("verify-gates.sh", "-x spotbugsMain")
+
     def test_spotbugs_removed_from_quality_gate(self):
         self.edit(
             "template/build.gradle",

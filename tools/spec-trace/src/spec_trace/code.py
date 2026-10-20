@@ -231,6 +231,24 @@ def _body_after(code: str, start: int) -> str | None:
     return code[i + 1 :]
 
 
+def _is_bare_call(region: str, m: re.Match[str], name: str) -> bool:
+    """宣言らしく見えた行が、行頭から始まる複数行の呼び出し（`name(` の後で改行し `…);` で閉じる）か.
+
+    名前の前に型・修飾子が無く（`testFoo(` だけ）、対応する ) の後が本体（{・throws・Kotlin の : / =）で
+    なければ呼び出し。
+    宣言とみなすと本体が無い（抽象メソッド扱い. アサーション数 -1）ことになり、検証の無いテストが D7 を素通りしていた。
+    """
+    open_at = m.end() - 1
+    name_at = region.rfind(name, m.start(), open_at)
+    if region[m.start() : name_at].strip():
+        return False  # 型・修飾子・アノテーションがある: 宣言
+    close = _close_paren(region, open_at)
+    if close < 0:
+        return False
+    after = region[close + 1 :].lstrip()
+    return not re.match(r"(?:\{|throws\b|:|=(?!=))", after)
+
+
 def _generic_lookup(text: str, symbol: str) -> Lookup:
     code = _strip_comments_and_strings(text)
     owner, name = split_symbol(symbol)
@@ -250,6 +268,8 @@ def _generic_lookup(text: str, symbol: str) -> Lookup:
         line_end = region.find("\n", m.end())
         line = region[m.start() : line_end if line_end >= 0 else len(region)]
         if line.rstrip().endswith(";") or re.match(r"\s*(?:return|new|throw)\b", line):
+            continue
+        if _is_bare_call(region, m, name):
             continue
         body = _body_after(region, m.end())
         if body is None:  # 抽象メソッド・インターフェースの宣言

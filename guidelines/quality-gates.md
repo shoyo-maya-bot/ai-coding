@@ -27,9 +27,9 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D6 | 実装の実在 | implemented 以上の要件の実装箇所が実在 | `spec-trace check`（`trace.implements_*`） |
 | D7 | テストの実在と検証 | proven の要件のテストが実在し、アサーション 1 件以上。さらに、そのテストが実行されて成功している（JUnit の結果 XML と照合） | `spec-trace check --test-results`（`trace.proof_*`） |
 | D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致。完了時（`--final` = `--require proven`）はハッシュの記録（pin）も必須 | `spec-trace check --enforce-drift`（`trace.spec_drift`・`trace.source_unpinned`） |
-| D9 | SQL の安全性 | Mapper XML に `${}` が無い | `verifyMapperSql` |
+| D9 | SQL の安全性 | Mapper XML と Mapper インターフェースの `@Select`・`@Insert`・`@Update`・`@Delete` に `${}` が無い（`@SelectProvider` など Java で組み立てる SQL はレビューで確かめる） | `verifyMapperSql` |
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
-| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures = true`・`failOnViolation = false`・`maxWarnings` が 0 以外・`enabled = false`・D4 の下限の引き下げ）、D4 の閾値を外から下げていない | `scripts/verify_authority.py` |
+| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures = true`・`failOnViolation = false`・`maxWarnings` が 0 以外・`enabled = false`・`onlyIf { false }`（`.set(…)`・`(…)` の書き方も）、`test` タスクでのテストの除外・絞り込み（karate 以外の `excludeTags` など）、D4 の下限の引き下げ・対象（`coverageTargets`）の縮小・除外）、D4 の閾値を外から下げていない、verify-gates・ワークフローでゲートを `-x` で外していない | `scripts/verify_authority.py` |
 
 D10 の Karate シナリオは、起動中のアプリと DB が要るので、この CI では実行しません（`spec-trace` は `trace.proof_result_unchecked` の警告で知らせます）。
 そのため、シナリオ**だけ**で裏付けている要件は `--test-results` で未証明（`trace.proof_unverified`）になります。単体テストも proofs に書いてください
