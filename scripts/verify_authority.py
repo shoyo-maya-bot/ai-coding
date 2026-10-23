@@ -8,15 +8,21 @@
 - check の実体（Gradle のタスク名・ツール名）が実在する
 - template/build.gradle でゲートが弱められていない（チェックは実在しても、効いていなければ空文化と同じ）
   - qualityGate の dependsOn から、authority.yaml の Gradle のゲート（compileJava・spotbugsMain など）が外れていない
-  - ignoreFailures = true・failOnViolation = false・maxWarnings が 0 以外・ゲートのタスクの enabled = false が無い
-    （`= true` のほか `.set(true)`・`(true)`・`setIgnoreFailures(true)`・`X.enabled = false`・`onlyIf { false }`・
-    `tasks.withType(Test) { enabled = false }` も見る）
+  - ignoreFailures・failOnViolation・maxWarnings・ゲートのタスクの enabled は、リテラルの false・true・0・true
+    以外にしていない（`= true` のほか `!false`・`true || x`・変数・`Integer.MAX_VALUE` などの式も弱体化とみなす。
+    `.set(v)`・`(v)`・`setIgnoreFailures(v)`・`X.enabled = v`・`tasks.withType(Test) { enabled = v }` も見る）
+  - ゲートのタスクに onlyIf { … } を付けていない（条件の中身に関わらず）
   - test タスクでテストを除外・絞り込んでいない（exclude・excludeTestsMatching・karate 以外の excludeTags・include 系）
   - D4 の分岐網羅率の下限（branchCoverageFloor）が MIN_BRANCH_COVERAGE 以上で、-P 等で下限より下げると失敗する作りのまま
   - D4 の対象（coverageTargets）から REQUIRED_COVERAGE_TARGETS が外れていない・検証から除外（excludes）していない
 - D4 の閾値を外から下げていない（gradle.properties・verify-gates・ワークフローの -PbranchCoverageMinimum /
   ORG_GRADLE_PROJECT_branchCoverageMinimum、この実行の環境変数）
 - verify-gates・ワークフローで、ゲートのタスクを -x / --exclude-task で外していない
+- D2・D5 の設定ファイル（checkstyle.xml・spotbugs の exclude.xml）が基準（traceability/gate-config-baseline.yaml）
+  より弱くない（モジュールの削除・設定の変更・抑止のフィルタ・除外の追加・設定ファイルの差し替え）
+
+使い方: python scripts/verify_authority.py [ROOT] [--write-baseline]
+  --write-baseline  今の checkstyle.xml・exclude.xml を基準として書いてから検証する（強める変更・承認した除外のとき）
 
 終了コード: 0 問題なし / 1 問題あり
 """
@@ -26,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET  # nosec B405  # リポジトリの中の設定ファイル（checkstyle.xml など）だけを読む
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -72,7 +79,6 @@ TASK_TYPES = {
     "SpotBugsTask": {"spotbugsMain"},
     "JacocoCoverageVerification": {"jacocoTestCoverageVerification"},
 }
-_SET = r"\s*(?:=|\.(?:set|convention)\s*\(|\(|)\s*"  # `x = v`・`x v`・`x(v)`・`x.set(v)`・`x.convention(v)`
 
 
 def _squash(text: str) -> str:
@@ -144,6 +150,23 @@ def _owner_tasks(code: str, pos: int) -> set[str]:
     return set()
 
 
+def _assignments(code: str, prop: str) -> list[tuple[int, str]]:
+    """prop の設定（`x = v`・`x v`・`x(v)`・`x.set(v)`・`x.convention(v)`・`setX(v)`）→ [(位置, 値)].
+
+    値は空白と括弧を除いた式の文字列（`!false`・`true||x` などをそのまま返す. 比較 `==` は設定ではない）.
+    """
+    setter = "set" + prop[:1].upper() + prop[1:]
+    pat = re.compile(
+        rf"\b(?:{prop}|{setter})(?:\s*=(?!=)|\s*\.\s*(?:set|convention)\s*\(|\s*\(|[ \t]+(?=[!(\w'\"-]))"
+        r"([^\n;}]*)"
+    )
+    out = []
+    for m in pat.finditer(code):
+        value = re.sub(r"[\s()]", "", m.group(1))
+        out.append((m.start(), value))
+    return out
+
+
 def _test_task_blocks(code: str) -> list[tuple[int, str]]:
     """test タスクの設定ブロック（tasks.named('test') { }・test { }・tasks.withType(Test) { }）."""
     return (
@@ -171,8 +194,9 @@ def check_test_filters(code: str) -> list[str]:
                     f"{WEAK}:{line}: test タスクで excludeTags {', '.join(extra) or m.group(1).strip()}"
                     f"（除外してよいのは {', '.join(sorted(ALLOWED_EXCLUDE_TAGS))} だけ）"
                 )
-        if re.search(r"\bfailOnNoMatchingTests" + _SET + "false", block):
-            errors.append(f"{WEAK}:{line}: test タスクで failOnNoMatchingTests = false")
+        for _, value in _assignments(block, "failOnNoMatchingTests"):
+            if value != "true":
+                errors.append(f"{WEAK}:{line}: test タスクで failOnNoMatchingTests = {value}")
     return errors
 
 
@@ -205,18 +229,25 @@ def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
         for t in sorted(gradle_tasks - deps):
             errors.append(f"ゲートの弱体化: qualityGate の dependsOn に {t} がありません（そのゲートが実行されない）")
 
-    for m in re.finditer(r"\b(?:ignoreFailures|setIgnoreFailures)" + _SET + r"(true)\b", code):
-        errors.append(f"{WEAK}:{_line(code, m.start())}: ignoreFailures = true（失敗しても通る）")
-    for m in re.finditer(r"\b(?:failOnViolation|setFailOnViolation)" + _SET + r"(false)\b", code):
-        errors.append(f"{WEAK}:{_line(code, m.start())}: failOnViolation = false（不足でも通る）")
-    for m in re.finditer(r"\b(?:maxWarnings|setMaxWarnings)" + _SET + r"(\d+)", code):
-        if int(m.group(1)) != 0:
-            errors.append(f"{WEAK}:{_line(code, m.start())}: maxWarnings = {m.group(1)}（0 にする）")
-    for m in re.finditer(r"\b(?:enabled|setEnabled)" + _SET + r"false\b|\bonlyIf\s*\{\s*false\s*\}", code):
-        for t in sorted(_owner_tasks(code, m.start()) & gradle_tasks):
+    # 値はリテラルだけ許す（`!false`・`true || x`・変数・Integer.MAX_VALUE などの式では弱められる）
+    for pos, value in _assignments(code, "ignoreFailures"):
+        if value != "false":
             errors.append(
-                f"{WEAK}:{_line(code, m.start())}: {t} が無効（enabled = false・onlyIf {{ false }}。実行されない）"
+                f"{WEAK}:{_line(code, pos)}: ignoreFailures = {value}（リテラルの false 以外。失敗しても通る）"
             )
+    for pos, value in _assignments(code, "failOnViolation"):
+        if value != "true":
+            errors.append(f"{WEAK}:{_line(code, pos)}: failOnViolation = {value}（リテラルの true 以外。不足でも通る）")
+    for pos, value in _assignments(code, "maxWarnings"):
+        if value != "0":
+            errors.append(f"{WEAK}:{_line(code, pos)}: maxWarnings = {value}（0 にする）")
+    for pos, value in _assignments(code, "enabled"):
+        if value != "true":
+            for t in sorted(_owner_tasks(code, pos) & gradle_tasks):
+                errors.append(f"{WEAK}:{_line(code, pos)}: {t} が無効（enabled = {value}。実行されない）")
+    for m in re.finditer(r"\bonlyIf\b", code):  # 条件の中身に関わらず、ゲートのタスクを条件付きにしない
+        for t in sorted(_owner_tasks(code, m.start()) & gradle_tasks):
+            errors.append(f"{WEAK}:{_line(code, m.start())}: {t} が無効（onlyIf {{ … }}。実行されないことがある）")
     errors += check_test_filters(code)
     errors += check_coverage_targets(code)
 
@@ -236,7 +267,10 @@ def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
         if _squash(snippet) not in flat:
             errors.append(f"{WEAK} の D4 に「{snippet}」がありません（下げられる）")
     return (
-        errors + check_coverage_overrides(root, floor or MIN_BRANCH_COVERAGE) + check_excluded_tasks(root, gradle_tasks)
+        errors
+        + check_coverage_overrides(root, floor or MIN_BRANCH_COVERAGE)
+        + check_excluded_tasks(root, gradle_tasks)
+        + check_tool_configs(root, code)
     )
 
 
@@ -298,6 +332,131 @@ def check_coverage_overrides(root: Path, floor: Decimal) -> list[str]:
     return errors
 
 
+# --- D2・D5 の設定ファイル（checkstyle.xml・exclude.xml）の弱体化 ------------------------------------------
+
+CHECKSTYLE_XML = "template/config/checkstyle/checkstyle.xml"
+SPOTBUGS_EXCLUDE_XML = "template/config/spotbugs/exclude.xml"
+BASELINE = "traceability/gate-config-baseline.yaml"
+# 足すと規約の違反を黙らせられるモジュール（抑止のフィルタ）
+SUPPRESSION_MODULES = {
+    "SuppressionFilter", "SuppressionXpathFilter", "SuppressionSingleFilter", "SuppressionXpathSingleFilter",
+    "SuppressWarningsFilter", "SuppressWarningsHolder", "SuppressionCommentFilter", "SuppressWithNearbyCommentFilter",
+    "SuppressWithPlainTextCommentFilter", "SuppressWithNearbyTextFilter", "BeforeExecutionExclusionFileFilter",
+}  # fmt: skip
+WEAK_SEVERITIES = {"ignore", "info"}
+# build.gradle の D5 の作り（空白は無視して比べる）
+SPOTBUGS_WIRING = (
+    "excludeFilter = file('config/spotbugs/exclude.xml')",
+    "effort = com.github.spotbugs.snom.Effort.valueOf('MAX')",
+)
+SPOTBUGS_FORBIDDEN = ("includeFilter", "onlyAnalyze", "omitVisitors", "baselineFile", "excludeBugsFilter")
+
+
+def _parse_xml(path: Path) -> ET.Element:
+    return ET.fromstring(path.read_bytes())  # nosec B314  # リポジトリの設定ファイルだけ。外部 DTD は読みに行かない
+
+
+def checkstyle_modules(path: Path) -> list[str]:
+    """checkstyle.xml の各モジュール → 'Checker/TreeWalker/LineLength {ignorePattern=…, max=120}' の形の文字列."""
+    out: list[str] = []
+
+    def walk(el: ET.Element, prefix: str) -> None:
+        name = el.get("name", "?")
+        here = f"{prefix}/{name}" if prefix else name
+        props = {p.get("name", ""): p.get("value", "") for p in el.findall("property")}
+        body = ", ".join(f"{k}={v}" for k, v in sorted(props.items()))
+        out.append(f"{here} {{{body}}}")
+        for child in el.findall("module"):
+            walk(child, here)
+
+    walk(_parse_xml(path), "")
+    return out
+
+
+def _canonical(el: ET.Element) -> str:
+    attrs = "".join(f" {k}={v!r}" for k, v in sorted(el.attrib.items()))
+    return f"<{el.tag}{attrs}>" + "".join(_canonical(c) for c in el) + f"</{el.tag}>"
+
+
+def spotbugs_excludes(path: Path) -> list[str]:
+    """exclude.xml の除外（Match など直下の要素）を正規化した文字列."""
+    return [_canonical(el) for el in _parse_xml(path)]
+
+
+def current_baseline(root: Path) -> dict[str, list[str]]:
+    return {
+        "checkstyle_modules": checkstyle_modules(root / CHECKSTYLE_XML),
+        "spotbugs_excludes": spotbugs_excludes(root / SPOTBUGS_EXCLUDE_XML),
+    }
+
+
+def check_tool_configs(root: Path, code: str) -> list[str]:
+    """D2（checkstyle.xml）・D5（exclude.xml）の設定が、基準（traceability/gate-config-baseline.yaml）より弱くないか.
+
+    - checkstyle.xml: 基準のモジュール（名前・置き場所・プロパティ）が全部ある（消す・値を変えるのは弱体化の恐れ）。
+      抑止のフィルタ（SuppressionFilter など）・severity の ignore / info を足していない
+    - exclude.xml: 基準に無い除外を足していない（除外を減らすのは自由）
+    - build.gradle: 設定ファイルを差し替えていない（configFile・includeFilter など）、D5 の除外・effort の作りのまま
+    強める変更（モジュールを足す・除外を減らす）は自由。値を変える・除外を足すときは、レビューで承認してから
+    `python scripts/verify_authority.py --write-baseline` で基準を同じ PR で更新する。
+    """
+    errors: list[str] = []
+    base_path = root / BASELINE
+    if not base_path.is_file():
+        return [f"ゲートの弱体化の基準 {BASELINE} がありません（--write-baseline で作る）"]
+    base = yaml.safe_load(base_path.read_text(encoding="utf-8")) or {}
+    for rel, kind in ((CHECKSTYLE_XML, "D2"), (SPOTBUGS_EXCLUDE_XML, "D5")):
+        if not (root / rel).is_file():
+            errors.append(f"ゲートの弱体化: {kind} の設定 {rel} がありません")
+    if errors:
+        return errors
+    try:
+        modules = checkstyle_modules(root / CHECKSTYLE_XML)
+        excludes = spotbugs_excludes(root / SPOTBUGS_EXCLUDE_XML)
+    except ET.ParseError as e:
+        return [f"ゲートの弱体化: D2・D5 の設定を XML として読めません: {e}"]
+
+    for m in base.get("checkstyle_modules", []):
+        if m not in modules:
+            errors.append(
+                f"ゲートの弱体化: {CHECKSTYLE_XML} に基準のモジュール「{m}」がありません（消した・設定を変えた。"
+                "強める変更なら基準を --write-baseline で更新する）"
+            )
+    for m in modules:
+        name = m.split(" ", 1)[0].rsplit("/", 1)[-1]
+        if name in SUPPRESSION_MODULES:
+            errors.append(f"ゲートの弱体化: {CHECKSTYLE_XML} に抑止のフィルタ {name}（違反を黙らせられる）")
+        for sev in re.findall(r"\bseverity=(\w+)", m):
+            if sev in WEAK_SEVERITIES:
+                errors.append(
+                    f"ゲートの弱体化: {CHECKSTYLE_XML} の {m.split(' ', 1)[0]} が severity={sev}（失敗しない）"
+                )
+    allowed = set(base.get("spotbugs_excludes", []))
+    for x in excludes:
+        if x not in allowed:
+            errors.append(
+                f"ゲートの弱体化: {SPOTBUGS_EXCLUDE_XML} に基準に無い除外 {x}（理由を書いてレビューで承認し、"
+                "--write-baseline で基準に足す）"
+            )
+
+    for m in re.finditer(r"\b(configFile|configDirectory|config)\s*(?:=(?!=)|\.\s*set\s*\()", code):
+        errors.append(
+            f"{WEAK}:{_line(code, m.start())}: Checkstyle の {m.group(1)} を差し替えない（{CHECKSTYLE_XML} を使う）"
+        )
+    for word in SPOTBUGS_FORBIDDEN:
+        for m in re.finditer(rf"\b{word}\b", code):
+            errors.append(f"{WEAK}:{_line(code, m.start())}: SpotBugs の {word}（D5 の対象・検出を狭める）")
+    flat = _squash(code)
+    for snippet in SPOTBUGS_WIRING:
+        if _squash(snippet) not in flat:
+            errors.append(f"{WEAK} の D5 に「{snippet}」がありません")
+    if len(re.findall(r"\bexcludeFilter\b", code)) > 1:
+        errors.append(f"{WEAK}: SpotBugs の excludeFilter が複数あります（{SPOTBUGS_EXCLUDE_XML} だけを使う）")
+    for m in re.finditer(r"\breportLevel\b[^\n]*\bHIGH\b", code):
+        errors.append(f"{WEAK}:{_line(code, m.start())}: SpotBugs の reportLevel を HIGH にしない（MEDIUM 以下）")
+    return errors
+
+
 def headings(md: Path) -> set[str]:
     return {m.group(1).strip() for m in re.finditer(r"^#{1,6}\s+(.+)$", md.read_text(encoding="utf-8"), re.M)}
 
@@ -347,8 +506,28 @@ def verify(root: Path) -> list[str]:
     return errors + check_gate_strength(root, gradle_tasks)
 
 
-def main() -> int:
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT
+def write_baseline(root: Path) -> Path:
+    path = root / BASELINE
+    head = (
+        "# D2（checkstyle.xml）・D5（exclude.xml）の基準。\n"
+        "# scripts/verify_authority.py（D11）がこれより弱い設定を検出する。更新は\n"
+        "# python scripts/verify_authority.py --write-baseline（強める変更、またはレビューで承認した除外のときだけ）\n"
+    )
+    path.write_text(
+        head + yaml.safe_dump(current_baseline(root), allow_unicode=True, sort_keys=False, width=1000),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    write = "--write-baseline" in args
+    args = [a for a in args if a != "--write-baseline"]
+    root = Path(args[0]) if args else ROOT
+    if write:
+        print(f"基準を書きました: {write_baseline(root).relative_to(root).as_posix()}")
     errors = verify(root)
     for e in errors:
         print(f"NG {e}")
