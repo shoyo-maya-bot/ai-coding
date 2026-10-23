@@ -290,6 +290,60 @@ def test_merge_adds_only_missing_methods_and_keeps_written_tests(repo, capsys):
     assert "変更なし" in capsys.readouterr().out
 
 
+def make_rows_spec(path: Path, rows: list[list[object]]) -> Path:
+    """会員シートだけの仕様書（1 行目が見出し）."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "会員"
+    ws.append(HEADERS)
+    for row in rows:
+        ws.append(row)
+    wb.save(path)
+    return path
+
+
+A = ["MemberService", "register", "REQ-API0002-003", "正常系", "メールを小文字にして登録する", "", "", ""]
+B = ["MemberService", "register", "REQ-API0002-002", "異常系", "メールの重複はエラー", "", "", ""]
+C = ["MemberService", "register", "REQ-API0002-001", "異常系", "名前が空はエラー", "", "", ""]
+
+
+def test_merge_follows_renumbered_cases_by_content_not_by_name(repo, capsys):
+    """項番を振り直した仕様書（先頭に新しいケース）で、名前が同じだけの別のケースを「既にある」とみなさない."""
+    spec = make_rows_spec(repo / "spec.xlsx", [[1, *A], [2, *B]])
+    assert run(repo, str(spec)) == 0
+    target = repo / MEMBER_TEST
+    text = target.read_text("utf-8").replace('fail("未実装: 1");', "assertThat(1).isEqualTo(1); // A を実装済み")
+    target.write_text(text, "utf-8")
+
+    spec2 = make_rows_spec(repo / "spec2.xlsx", [[1, *C], [2, *A], [3, *B]])  # C を先頭に足して振り直し
+    capsys.readouterr()
+    assert run(repo, str(spec2), "--merge", "--proofs-out", "proofs.yaml") == 0
+    out = capsys.readouterr().out
+    merged = target.read_text("utf-8")
+    assert merged.count("// A を実装済み") == 1
+    # 新しい項番 1（C）は既存の register_case1（A）とは別のケース. 別名で足す
+    assert "void register_case1_2()" in merged
+    assert '@DisplayName("1 名前が空はエラー")' in merged
+    assert merged.count("void register_case") == 3  # A・B は足さない（観点で対応づく）
+    assert "目印の項番を直してください" in out
+    proofs = yaml.safe_load((repo / "proofs.yaml").read_text("utf-8"))
+    assert proofs["REQ-API0002-003"][0]["symbol"] == "MemberServiceTest#register_case1"  # A は既存のメソッド
+    assert proofs["REQ-API0002-002"][0]["symbol"] == "MemberServiceTest#register_case2"  # B も既存
+    assert proofs["REQ-API0002-001"][0]["symbol"] == "MemberServiceTest#register_case1_2"
+    assert run(repo, str(spec2), "--merge", "--strict") == 1  # 目印のずれは警告
+
+
+def test_merge_same_marker_with_different_viewpoint_is_a_new_case(repo, capsys):
+    spec = make_rows_spec(repo / "spec.xlsx", [[1, *A]])
+    assert run(repo, str(spec)) == 0
+    spec2 = make_rows_spec(repo / "spec2.xlsx", [[1, *C]])  # 項番 1 の中身が入れ替わった
+    capsys.readouterr()
+    assert run(repo, str(spec2), "--merge") == 0
+    merged = (repo / MEMBER_TEST).read_text("utf-8")
+    assert "void register_case1()" in merged and "void register_case1_2()" in merged
+    assert "観点が違います" in capsys.readouterr().out
+
+
 def test_merge_adds_missing_imports_without_clashing_with_assertj_fail(repo):
     spec = make_spec(repo / "spec.xlsx", order=False)
     target = repo / MEMBER_TEST

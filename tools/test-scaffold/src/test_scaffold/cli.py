@@ -23,7 +23,7 @@ import yaml
 from . import __version__
 from .config import default_config_yaml, load_config
 from .errors import ExitCode, UsageError
-from .java import TestClass, existing_keys, merge_into, missing_methods, plan_classes, render_class
+from .java import TestClass, merge_into, plan_classes, plan_merge, render_class
 from .reader import Notice, read_workbook
 
 TOOL = "test-scaffold"
@@ -154,9 +154,9 @@ def plan(args: argparse.Namespace) -> tuple[list[Action], list[Notice], list[Not
             )
             actions.append(Action(tc, rel, "skip"))
             continue
-        todo = missing_methods(tc, current)
-        names, _ = existing_keys(current)
-        present = [m for m in tc.methods if m.name in names or m in todo]
+        mp = plan_merge(tc, current)
+        todo, present = mp.todo, mp.present
+        warnings += [Notice(rel.as_posix(), msg) for msg in mp.notices]
         if not todo:
             actions.append(Action(tc, rel, "unchanged", [], present))
             continue

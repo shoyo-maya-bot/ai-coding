@@ -23,6 +23,7 @@ class RepoCopy(unittest.TestCase):
             shutil.copytree(ROOT / d, self.tmp / d)
         (self.tmp / "template").mkdir()
         shutil.copy(ROOT / "template/build.gradle", self.tmp / "template/build.gradle")
+        shutil.copytree(ROOT / "template/config", self.tmp / "template/config")
         (self.tmp / "tools/spec-trace").mkdir(parents=True)
 
     def tearDown(self):
@@ -235,6 +236,132 @@ class GateStrengthTest(RepoCopy):
 
     def test_repository_workflows_do_not_lower_coverage(self):
         self.assertEqual(verify_authority.check_coverage_overrides(ROOT, verify_authority.MIN_BRANCH_COVERAGE), [])
+
+    # --- 第 7 回の指摘: 式で弱める書き方・checkstyle.xml / exclude.xml の弱体化 ---
+
+    def test_ignore_failures_set_by_expression(self):
+        for form in (
+            "ignoreFailures = !false",
+            "ignoreFailures = !!true",
+            "ignoreFailures = (true)",
+            "ignoreFailures = true || false",
+            "ignoreFailures = project.hasProperty('skipGates')",
+            "ignoreFailures.set(!false)",
+            "ignoreFailures !false",
+        ):
+            with self.subTest(form=form):
+                self.setUp()
+                self.edit("template/build.gradle", "    ignoreFailures = false\n}", f"    {form}\n}}")
+                self.assert_weakened("ignoreFailures")
+
+    def test_ignore_failures_comparison_is_not_an_assignment(self):
+        self.edit(
+            "template/build.gradle",
+            "tasks.named('check') {",
+            "if (checkstyle.ignoreFailures == false) { println 'ok' }\ntasks.named('check') {",
+        )
+        self.assertEqual(self.errors(), [])
+
+    def test_max_warnings_and_fail_on_violation_by_expression(self):
+        self.edit("template/build.gradle", "maxWarnings = 0", "maxWarnings = Integer.MAX_VALUE")
+        self.assert_weakened("maxWarnings = Integer.MAX_VALUE")
+        self.setUp()
+        self.edit(
+            "template/build.gradle", "    violationRules {\n", "    violationRules {\n        failOnViolation = !true\n"
+        )
+        self.assert_weakened("failOnViolation = !true")
+
+    def test_gate_task_disabled_by_expression_or_conditional_only_if(self):
+        forms = {
+            "tasks.named('spotbugsMain') { enabled = !true }": "spotbugsMain",
+            "checkstyleMain.enabled = System.getenv('CI') != null": "checkstyleMain",
+            "tasks.named('verifyMapperSql') { onlyIf { !true } }": "verifyMapperSql",
+            "tasks.named('test') { onlyIf { project.hasProperty('runTests') } }": "test",
+        }
+        for form, task in forms.items():
+            with self.subTest(form=form):
+                self.setUp()
+                self.edit("template/build.gradle", "tasks.named('check') {", form + "\ntasks.named('check') {")
+                self.assert_weakened(task, "無効")
+
+    def test_checkstyle_module_removed_or_relaxed(self):
+        cs = "template/config/checkstyle/checkstyle.xml"
+        self.edit(cs, '    <module name="NeedBraces"/>\n', "")
+        self.assert_weakened("checkstyle.xml", "NeedBraces")
+        self.setUp()
+        self.edit(cs, '<property name="max" value="120"/>', '<property name="max" value="300"/>')
+        self.assert_weakened("checkstyle.xml", "LineLength")
+
+    def test_checkstyle_suppression_and_severity(self):
+        cs = "template/config/checkstyle/checkstyle.xml"
+        self.edit(
+            cs,
+            '  <module name="TreeWalker">\n',
+            '  <module name="SuppressWarningsFilter"/>\n  <module name="TreeWalker">\n',
+        )
+        self.assert_weakened("SuppressWarningsFilter")
+        self.setUp()
+        self.edit(
+            cs,
+            '<module name="UnusedImports"/>',
+            '<module name="UnusedImports"><property name="severity" value="ignore"/></module>',
+        )
+        self.assert_weakened("UnusedImports", "severity=ignore")
+
+    def test_checkstyle_stricter_module_is_fine(self):
+        cs = "template/config/checkstyle/checkstyle.xml"
+        self.edit(
+            cs,
+            '    <module name="NeedBraces"/>\n',
+            '    <module name="NeedBraces"/>\n    <module name="FinalClass"/>\n',
+        )
+        self.assertEqual(self.errors(), [])
+
+    def test_spotbugs_exclude_added(self):
+        self.edit(
+            "template/config/spotbugs/exclude.xml",
+            "</FindBugsFilter>",
+            '  <Match>\n    <Bug pattern="SQL_INJECTION_JDBC"/>\n  </Match>\n</FindBugsFilter>',
+        )
+        self.assert_weakened("exclude.xml", "SQL_INJECTION_JDBC")
+
+    def test_spotbugs_exclude_removed_is_fine(self):
+        p = self.tmp / "template/config/spotbugs/exclude.xml"
+        text = p.read_text(encoding="utf-8")
+        start = text.index("  <!-- バッチの終了コード")
+        end = text.index("</Match>", start) + len("</Match>\n")
+        p.write_text(text[:start] + text[end:], encoding="utf-8")
+        self.assertEqual(self.errors(), [])
+
+    def test_tool_config_replaced_in_build_gradle(self):
+        forms = {
+            "checkstyle {\n    configFile = file('lenient.xml')": "configFile",
+            "spotbugs {\n    onlyAnalyze = ['com.example.app.member.*']": "onlyAnalyze",
+            "spotbugs {\n    reportLevel = com.github.spotbugs.snom.Confidence.valueOf('HIGH')": "HIGH",
+        }
+        for form, word in forms.items():
+            with self.subTest(form=form):
+                self.setUp()
+                head = form.split("\n", 1)[0]
+                self.edit("template/build.gradle", head, form)
+                self.assert_weakened(word)
+
+    def test_baseline_matches_repository_configs(self):
+        """基準（traceability/gate-config-baseline.yaml）が今の設定と一致する（更新漏れを機械で見つける）."""
+        import yaml
+
+        base = yaml.safe_load((ROOT / verify_authority.BASELINE).read_text(encoding="utf-8"))
+        self.assertEqual(base, verify_authority.current_baseline(ROOT))
+
+    def test_write_baseline_accepts_a_reviewed_exclude(self):
+        self.edit(
+            "template/config/spotbugs/exclude.xml",
+            "</FindBugsFilter>",
+            '  <!-- 理由 -->\n  <Match>\n    <Bug pattern="DM_DEFAULT_ENCODING"/>\n  </Match>\n</FindBugsFilter>',
+        )
+        self.assertTrue(self.errors())
+        verify_authority.write_baseline(self.tmp)
+        self.assertEqual(self.errors(), [])
 
 
 if __name__ == "__main__":

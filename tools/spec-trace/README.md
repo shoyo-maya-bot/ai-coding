@@ -26,6 +26,17 @@ spec-trace schema                                # 定義ファイルの JSON Sc
 | `trace.proof_result_unchecked` | （`--test-results` のとき・警告）シナリオ（.feature）の実行結果が無く照合していない（単体テストでも裏付けている要件） |
 | `trace.proof_unverified` | （`--test-results` のとき）シナリオ（.feature）だけで裏付けている要件で、そのシナリオの実行結果が無い（未証明） |
 
+## 終了コード
+
+| コード | 意味 |
+|---|---|
+| 0 | 問題なし（警告だけなら 0） |
+| 1 | error の指摘あり |
+| 2 | 定義ファイル・引数の誤り（`--test-results` のファイルが無い・読めないときも） |
+| 3 | 実行時エラー |
+
+`check` のオプション（`--require`・`--min-asserts`・`--enforce-drift`・`--test-results`・`-f`・`-o`・`--log-level`）は `spec-trace check --help` で表示します。
+
 ## テストが「実行されて成功した」ことも確かめる（--test-results）
 
 既定の検査は「テストが実在し、アサーションがある」までで、テストが通ったかは見ません。
@@ -79,4 +90,5 @@ Java のテキストブロック・Kotlin の raw 文字列（`"""…"""`）の�
 | Jest・Vitest・Chai | `expect(…)`（後ろの `.toBe(…)` などは数えない。1 つの `expect` で 1 件） |
 | Kotest | `shouldXxx(…)`（`shouldBe`・`shouldThrow<…>` など） |
 | Go の testing | `t.Error(…)`・`t.Errorf(…)`・`t.Fatal(…)`・`t.Fatalf(…)`・`t.Fail()` |
+
 保証するのは「存在」と「最低限の検証」までで、テストの意味的な妥当性は人がレビューします。
