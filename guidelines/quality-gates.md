@@ -8,7 +8,7 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | 順 | ゲート | 実行するもの |
 |---|---|---|
 | 1 | D1〜D5・D9 | `template/gradlew -p template --continue qualityGate` |
-| 2 | ツールのテスト | `pytest tools/spec-trace/tests tests` |
+| 2 | ツールのテスト | `pytest tools/spec-trace/tests tools/test-scaffold/tests tests` |
 | 3 | lint | `ruff check` と `ruff format --check`（tools・scripts・tests） |
 | 4 | D6〜D8・D10 | `spec-trace check traceability/specs --enforce-drift --require <状態> --test-results template/build/test-results/test` |
 | 5 | D11 | `scripts/verify_authority.py` |
@@ -29,7 +29,11 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致。完了時（`--final` = `--require proven`）はハッシュの記録（pin）も必須 | `spec-trace check --enforce-drift`（`trace.spec_drift`・`trace.source_unpinned`） |
 | D9 | SQL の安全性 | Mapper XML と Mapper インターフェースの `@Select`・`@Insert`・`@Update`・`@Delete` に `${}` が無い（`@SelectProvider` など Java で組み立てる SQL はレビューで確かめる） | `verifyMapperSql` |
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
-| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures = true`・`failOnViolation = false`・`maxWarnings` が 0 以外・`enabled = false`・`onlyIf { false }`（`.set(…)`・`(…)` の書き方も）、`test` タスクでのテストの除外・絞り込み（karate 以外の `excludeTags` など）、D4 の下限の引き下げ・対象（`coverageTargets`）の縮小・除外）、D4 の閾値を外から下げていない、verify-gates・ワークフローでゲートを `-x` で外していない | `scripts/verify_authority.py` |
+| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures`・`failOnViolation`・`maxWarnings`・ゲートのタスクの `enabled` をリテラルの `false`・`true`・`0`・`true` 以外にする（`= true` のほか `!false`・`true || x`・変数・`Integer.MAX_VALUE` などの式も。`.set(…)`・`(…)` の書き方も）・ゲートのタスクの `onlyIf { … }`、`test` タスクでのテストの除外・絞り込み（karate 以外の `excludeTags` など）、D4 の下限の引き下げ・対象（`coverageTargets`）の縮小・除外）、D4 の閾値を外から下げていない、verify-gates・ワークフローでゲートを `-x` で外していない。D2・D5 の設定ファイル（`checkstyle.xml`・SpotBugs の `exclude.xml`）が基準（`traceability/gate-config-baseline.yaml`）より弱くない（モジュールの削除・設定の変更・抑止のフィルタ・`severity` の `ignore` / `info`・除外の追加・`build.gradle` での設定ファイルの差し替え） | `scripts/verify_authority.py` |
+
+D2・D5 の設定を強める変更（Checkstyle のモジュールを足す・SpotBugs の除外を減らす）は基準を直さずに通ります。
+Checkstyle の設定値を変える・SpotBugs の除外を足すときは、理由を書いてレビューで承認を得てから、
+`python scripts/verify_authority.py --write-baseline` で基準を同じ PR で更新します（基準の差分がレビューの対象になります）。
 
 D10 の Karate シナリオは、起動中のアプリと DB が要るので、この CI では実行しません（`spec-trace` は `trace.proof_result_unchecked` の警告で知らせます）。
 そのため、シナリオ**だけ**で裏付けている要件は `--test-results` で未証明（`trace.proof_unverified`）になります。単体テストも proofs に書いてください
