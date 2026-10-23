@@ -301,15 +301,151 @@ def existing_keys(text: str) -> tuple[set[str], set[tuple[str, str]]]:
     return names, markers
 
 
+_COMMENT_LABEL = re.compile(r"^\s*//\s*([^\s:：][^:：]*):\s")
+_COMMENT_CONT = re.compile(r"^\s*//\s{3}")
+
+
+@dataclass
+class ExistingMethod:
+    name: str
+    marker: tuple[str, str] | None  # 直前の雛形の目印（項番, シート）
+    viewpoint: tuple[str, ...] | None  # 直前の「// 観点: …」の行（前後の空白を除く）
+
+
+def existing_methods(text: str) -> list[ExistingMethod]:
+    """既存のソースのメソッドと、その直前（前のメソッドより後ろ）にある雛形の目印・観点のコメント."""
+    out: list[ExistingMethod] = []
+    marker: tuple[str, str] | None = None
+    viewpoint: list[str] | None = None
+    in_viewpoint = False
+    for line in text.splitlines():
+        m = _MARKER.match(line)
+        if m:
+            marker, viewpoint, in_viewpoint = (m.group(1).strip(), m.group(2).strip()), None, False
+            continue
+        label = _COMMENT_LABEL.match(line)
+        if label and not _COMMENT_CONT.match(line):
+            in_viewpoint = label.group(1).strip() == "観点"
+            if in_viewpoint:
+                viewpoint = [line.strip()]
+            continue
+        if in_viewpoint and viewpoint is not None and _COMMENT_CONT.match(line):
+            viewpoint.append(line.strip())
+            continue
+        in_viewpoint = False
+        for name in _METHOD_DECL.findall(line):
+            out.append(ExistingMethod(name, marker, tuple(viewpoint) if viewpoint is not None else None))
+            marker, viewpoint = None, None
+    return out
+
+
+def _viewpoint_lines(case: Case) -> tuple[str, ...]:
+    return tuple(line.strip() for line in _comment_lines("観点", case.viewpoint, INDENT))
+
+
+@dataclass
+class MergePlan:
+    todo: list[Method]  # 足すメソッド
+    present: list[Method]  # 結果のファイルにあるメソッド（既存のものは既存の名前で。proofs の候補にする）
+    notices: list[str]
+
+
+def plan_merge(tc: TestClass, text: str) -> MergePlan:
+    """差分モードで足すメソッドを決める（名前だけでは照合しない）.
+
+    1. 雛形の目印のあるメソッドは、シートと観点（// 観点: のコメント）が同じなら同じケースとみなす.
+       項番を振り直した仕様書でも、内容で古いメソッドに対応づける（目印の項番が違えば警告）
+    2. 目印の項番・シートが同じでも観点が違うメソッドは別のケースとみなし、新しいメソッドを別名で足して警告する
+       （観点のコメントを消したメソッドは、目印の項番で対応づける）
+    3. 目印の無いメソッド（目印を消して実装したテスト）は名前で照合する. 同じ名前のメソッドが別の項番の目印を
+       持っていれば、別名で足して警告する
+    """
+    existing = existing_methods(text)
+    _, markers = existing_keys(text)
+    names = {e.name for e in existing}
+    used = set(names)
+    keys = {id(m): (_safe_comment(m.case.id).strip(), _safe_comment(m.case.sheet).strip()) for m in tc.methods}
+    claimed: dict[int, ExistingMethod] = {}
+
+    # 1. 内容（シート + 観点）で対応づける. 同じ項番のものを先に
+    taken: set[int] = set()
+    for same_id in (True, False):
+        for m in tc.methods:
+            if id(m) in claimed:
+                continue
+            key, vp = keys[id(m)], _viewpoint_lines(m.case)
+            for e in existing:
+                if (
+                    id(e) not in taken
+                    and e.marker is not None
+                    and e.viewpoint == vp
+                    and e.marker[1] == key[1]
+                    and (e.marker[0] == key[0]) == same_id
+                ):
+                    claimed[id(m)] = e
+                    taken.add(id(e))
+                    break
+
+    todo: list[Method] = []
+    present: list[Method] = []
+    notices: list[str] = []
+
+    def keys_of(m: Method) -> str:
+        k = keys.get(id(m), ("", ""))
+        return f"{k[0]}（シート: {k[1]}）"
+
+    def add(m: Method, why: str | None) -> None:
+        label = keys_of(m)
+        if m.name in used:
+            n = 2
+            while f"{m.name}_{n}" in used:
+                n += 1
+            m = Method(f"{m.name}_{n}", m.case)
+        if why:
+            notices.append(f"{why}。項番 {label} は {m.name} として足しました（項番の振り直しを確かめてください）")
+        used.add(m.name)
+        todo.append(m)
+        present.append(m)
+
+    for m in tc.methods:
+        key = keys[id(m)]
+        e = claimed.get(id(m))
+        if e is not None:
+            present.append(Method(e.name, m.case))
+            if e.marker != key:
+                notices.append(
+                    f"項番 {key[0]}（シート: {key[1]}）は、観点が同じ {e.name}（目印は項番 {e.marker[0]}）と"
+                    "同じケースとみなしました。目印の項番を直してください"
+                )
+            continue
+        same = [x for x in existing if x.marker == key and id(x) not in taken]
+        if same:
+            x = same[0]
+            if x.viewpoint is None:  # 観点のコメントを消したメソッドは目印の項番で対応づける
+                taken.add(id(x))
+                present.append(Method(x.name, m.case))
+            else:
+                add(m, f"{x.name} は項番 {key[0]} の目印付きですが観点が違います")
+            continue
+        if key in markers and not any(x.marker == key for x in existing):
+            continue  # 目印はあるが、その後ろにメソッドが無い（足さない。proofs の候補にもしない）
+        by_name = [x for x in existing if x.name == m.name]
+        if by_name:
+            x = by_name[0]
+            if x.marker is None or (x.marker == key and id(x) not in taken):
+                taken.add(id(x))
+                present.append(m)
+                continue
+            other = f"{x.marker[0]}（シート: {x.marker[1]}）" if x.marker else "?"
+            add(m, f"{m.name} は別のケース（項番 {other}）のメソッドです")
+            continue
+        add(m, None)
+    return MergePlan(todo, present, notices)
+
+
 def missing_methods(tc: TestClass, text: str) -> list[Method]:
-    """既存のソースに無いメソッドだけ（メソッド名か、項番とシートの目印があれば「ある」とみなす）."""
-    names, markers = existing_keys(text)
-    return [
-        m
-        for m in tc.methods
-        if m.name not in names
-        and (_safe_comment(m.case.id).strip(), _safe_comment(m.case.sheet).strip()) not in markers
-    ]
+    """既存のソースに無いメソッドだけ（plan_merge の todo）."""
+    return plan_merge(tc, text).todo
 
 
 def merge_into(text: str, methods: list[Method]) -> str:
