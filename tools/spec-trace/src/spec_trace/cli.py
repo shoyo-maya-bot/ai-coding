@@ -58,8 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     common_cli.add_common_args(c)
 
     pn = sub.add_parser("pin", help="設計書の現在のハッシュを定義に記録する（承認後に人が実行）")
-    pn.add_argument("paths", nargs="+", type=Path)
-    pn.add_argument("--root", type=Path, default=Path("."))
+    pn.add_argument("paths", nargs="+", type=Path, help="定義ファイル（YAML / JSON）またはそのディレクトリ")
+    pn.add_argument("--root", type=Path, default=Path("."), help="source の起点（既定: .）")
     common_cli.add_common_args(pn)
 
     sc = sub.add_parser("schema", help="定義ファイルの JSON Schema を出力する")

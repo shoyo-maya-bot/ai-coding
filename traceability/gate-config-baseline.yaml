@@ -1,0 +1,38 @@
+# D2（checkstyle.xml）・D5（exclude.xml）の基準。
+# scripts/verify_authority.py（D11）がこれより弱い設定を検出する。更新は
+# python scripts/verify_authority.py --write-baseline（強める変更、またはレビューで承認した除外のときだけ）
+checkstyle_modules:
+- Checker {charset=UTF-8, severity=error}
+- Checker/FileTabCharacter {}
+- Checker/NewlineAtEndOfFile {lineSeparator=lf}
+- Checker/LineLength {ignorePattern=^(package|import) , max=120}
+- Checker/TreeWalker {}
+- Checker/TreeWalker/TypeName {}
+- Checker/TreeWalker/MethodName {format=^[a-z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$}
+- Checker/TreeWalker/LocalVariableName {}
+- Checker/TreeWalker/MemberName {}
+- Checker/TreeWalker/ParameterName {}
+- Checker/TreeWalker/ConstantName {format=^(log|[A-Z][A-Z0-9]*(_[A-Z0-9]+)*)$}
+- Checker/TreeWalker/PackageName {format=^com\.example\.app(\.[a-z][a-z0-9]*)*$|^karate$}
+- Checker/TreeWalker/AvoidStarImport {allowStaticMemberImports=false}
+- Checker/TreeWalker/UnusedImports {}
+- Checker/TreeWalker/RedundantImport {}
+- Checker/TreeWalker/NeedBraces {}
+- Checker/TreeWalker/EmptyBlock {option=text}
+- Checker/TreeWalker/EmptyCatchBlock {}
+- Checker/TreeWalker/EqualsHashCode {}
+- Checker/TreeWalker/SimplifyBooleanExpression {}
+- Checker/TreeWalker/StringLiteralEquality {}
+- Checker/TreeWalker/MissingSwitchDefault {}
+- Checker/TreeWalker/OneStatementPerLine {}
+- Checker/TreeWalker/MultipleVariableDeclarations {}
+- Checker/TreeWalker/ModifierOrder {}
+- Checker/TreeWalker/UpperEll {}
+- Checker/TreeWalker/Regexp {format=System\.(out|err)\.print|\.printStackTrace\(\), illegalPattern=true, message=System.out / printStackTrace は使わない（ロガーを使う）}
+- Checker/TreeWalker/ParameterNumber {max=7}
+- Checker/TreeWalker/MethodLength {max=80}
+- Checker/TreeWalker/CyclomaticComplexity {max=12}
+spotbugs_excludes:
+- <Match><Bug pattern='EI_EXPOSE_REP2'></Bug><Class name='~com\\.example\\.app\\..*(Controller|Service|Job|Fetcher|Handler)'></Class></Match>
+- <Match><Bug pattern='EI_EXPOSE_REP,EI_EXPOSE_REP2'></Bug><Class name='~com\\.example\\.app\\..*\\.(ErrorResponse|ImportResult)'></Class></Match>
+- <Match><Bug pattern='DM_EXIT'></Bug><Class name='com.example.app.AppApplication'></Class></Match>

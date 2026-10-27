@@ -34,7 +34,7 @@
 
 ## すぐ試す（同梱のサンプルで）
 
-前提: [dev-environment](https://github.com/shoyo-maya-bot/dev-environment) のローカル環境（Java 17・Rancher Desktop）と Python 3.12。
+前提: [dev-environment](https://github.com/shoyo-maya-bot/dev-environment) のローカル環境（Java 17・Rancher Desktop）と Python 3.10 以上（CI は 3.12）。
 
 ```bash
 git clone https://github.com/shoyo-maya-bot/ai-coding.git
@@ -72,7 +72,8 @@ ai-coding/
 ├── template/                     # 生成先の Spring Boot プロジェクト（品質ゲート入り）
 ├── traceability/
 │   ├── specs/                    # 要件 ↔ 実装 ↔ テストの対応表（1 機能 1 ファイル）
-│   └── authority.yaml            # ルール ↔ チェックの対応表
+│   ├── authority.yaml            # ルール ↔ チェックの対応表
+│   └── gate-config-baseline.yaml # D2・D5 の設定（checkstyle.xml・exclude.xml）の基準（D11 が弱体化を検出）
 ├── tools/spec-trace/             # 対応表の検証ツール
 ├── tools/test-scaffold/          # Excel のテスト仕様書 → JUnit 5 のテストの雛形
 ├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs、check_template_drift
@@ -108,8 +109,12 @@ D10 の Karate シナリオは CI では実行しません（起動中のアプ�
 - **下げることはできません**。`-PbranchCoverageMinimum`（`ORG_GRADLE_PROJECT_branchCoverageMinimum`・`gradle.properties` も）に
   下限より低い値を渡すと Gradle が失敗し、D11（`verify_authority.py`）も下限・既定値の引き下げ、verify-gates・ワークフロー・
   `gradle.properties`・実行時の環境変数での引き下げを error にします
-- D11 は同じく、`qualityGate` の `dependsOn` からゲート（`spotbugsMain` など）を外す、`ignoreFailures = true`、
-  `failOnViolation = false`、`maxWarnings` を 0 以外にする、ゲートのタスクを `enabled = false` にする、も検出します
+- D11 は同じく、`qualityGate` の `dependsOn` からゲート（`spotbugsMain` など）を外す、`ignoreFailures`・`failOnViolation`・
+  `maxWarnings`・ゲートのタスクの `enabled` をリテラルの `false`・`true`・`0`・`true` 以外にする（`!false` などの式も）、
+  ゲートのタスクに `onlyIf` を付ける、も検出します
+- D2・D5 の設定ファイル（`checkstyle.xml`・`exclude.xml`）も、基準（`traceability/gate-config-baseline.yaml`）より弱くすると
+  D11 が検出します。強める変更はそのまま通り、設定値の変更・除外の追加はレビューの承認後に
+  `python scripts/verify_authority.py --write-baseline` で基準を同じ PR で更新します
 
 verify-gates の `docs` ゲートでは、ドキュメントと設定ファイルを検査します（`python scripts/check_docs.py`、ネットワーク不要）。
 
@@ -134,6 +139,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10（第 7 回） | D11: `ignoreFailures = !false` のような式・変数での弱体化（リテラル以外の値）、ゲートのタスクの `onlyIf { … }`、`checkstyle.xml` のモジュールの削除・設定の変更・抑止のフィルタ、SpotBugs の `exclude.xml` への除外の追加、`build.gradle` での設定ファイルの差し替えを検出（基準は `traceability/gate-config-baseline.yaml`）。test-scaffold の `--merge`: 項番を振り直した仕様書でも名前だけで照合せず、雛形の目印と観点で対応づける（項番が同じでも観点が違えば別のケースとして別名で足し、警告）。`--proofs-out` は既存のメソッドを既存の名前で書く | Checkstyle の設定値を変える・SpotBugs の除外を足す PR は、`--write-baseline` で基準も更新しないと D11 で落ちる。項番を振り直した仕様書で `--merge` すると、警告が出て（`--strict` なら終了コード 1）、新しいケースが `_2` 付きの名前で足される |
 | 2026-10（第 6 回） | D11: ゲートの弱体化を `ignoreFailures.set(true)`・`X.enabled = false`・`onlyIf { false }`・`tasks.withType(Test) { enabled = false }` の書き方でも検出。`test` タスクでのテストの除外・絞り込み、D4 の対象（`coverageTargets`）の縮小・除外、verify-gates・ワークフローの `-x <ゲート>` も検出。D9: Mapper インターフェースの `@Select` 等の `${}` も検出。spec-trace: 行頭から始まる複数行の呼び出しをテストの宣言とみなさない（アサーションの無いテストが D7 を素通りしていた）。Python の結果の照合で、ファイル名だけの一致は同名のテストファイルがほかに無いときだけ。devtools-common の固定を 04f3915 に | これらの書き方でゲートを弱めた template・アサーションの無いテストは D11・D9・D7 で落ちる。pytest の rootdir をテストのフォルダにしていて、同名のテストファイルが複数あると `trace.proof_not_run`（rootdir をリポジトリのルートにする） |
 | 2026-10 | Excel のテスト仕様書から JUnit 5 のテストの雛形を作る [tools/test-scaffold](tools/test-scaffold/README.md) と `/ai-test-scaffold` を追加。verify-gates の tools tests でそのテストも実行し、constraints.txt に openpyxl を追加。spec-trace の `--test-results` は `@DisplayName` の付いたテストを表示名でも照合する（Gradle の結果ではテストの名前が表示名になり、これまで `trace.proof_not_run` になっていた） | 手元で verify-gates を流すには `python -m pip install -e "tools/test-scaffold[dev]" -c constraints.txt` も要る（README の手順は更新済み） |
 | 2026-10（第 5 回） | spec-trace: pin（`source_sha256`）の無い対応表は `--require proven`（`--final`・main）で error。spec-pin は pin の無い対応表の新規追加にも `spec-pin-approved` ラベルを求める。テスト結果はパッケージ付きのクラス名（Java は `package` 宣言、Python はファイルのパス）で照合する。D11 が `build.gradle` のゲートの弱体化（`qualityGate` からの除外・`ignoreFailures = true` など）と D4 の閾値の引き下げを検出。D4 の下限（80%）より低い `-PbranchCoverageMinimum` は Gradle が失敗する | pin の無い対応表は main で落ちる・新規追加の PR はラベルが要る。別のパッケージの同名のテストクラスの結果では proven にならない。D4 の閾値は上げられるが下げられない |
