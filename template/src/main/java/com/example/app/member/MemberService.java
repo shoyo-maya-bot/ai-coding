@@ -29,14 +29,15 @@ public class MemberService {
     public Member register(String name, String email) {
         String normalized = email.trim().toLowerCase(Locale.ROOT);
         // 事前の確認は「よくある重複」を早く返すため。同時に登録されたときの最終的な判定は DB の一意制約に任せる
+        // 応答（409）にはメールアドレスを入れない（埋め込み値なし. 入力した値を応答に映さない）
         if (mapper.existsByEmail(normalized)) {
-            throw new BusinessException(MessageIds.EMAIL_ALREADY_USED, normalized);
+            throw new BusinessException(MessageIds.EMAIL_ALREADY_USED);
         }
         MemberRecord rec = new MemberRecord(name.trim(), normalized);
         try {
             mapper.insert(rec);
         } catch (DuplicateKeyException e) {
-            throw new BusinessException(MessageIds.EMAIL_ALREADY_USED, normalized);
+            throw new BusinessException(MessageIds.EMAIL_ALREADY_USED);
         }
         return rec.toMember();
     }

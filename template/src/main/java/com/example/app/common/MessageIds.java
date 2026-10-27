@@ -25,6 +25,8 @@ public final class MessageIds {
     public static final String IMPORT_STARTED = "APPI0001";
     public static final String IMPORT_FINISHED = "APPI0002";
     public static final String IMPORT_LINE_SKIPPED = "APPW0001";
+    /** バッチ: 登録済みの注文番号で内容が違う行を飛ばした（終了コード 6）. */
+    public static final String IMPORT_CONFLICT = "APPW0002";
 
     private MessageIds() {}
 }
