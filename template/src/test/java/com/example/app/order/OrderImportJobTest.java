@@ -34,6 +34,28 @@ class OrderImportJobTest {
     }
 
     @Test
+    void exitCodeSixWhenSameOrderNoHasDifferentContent() {
+        // 後退: 内容の違う重複を duplicated として黙って捨て、終了コード 0 で終わっていた
+        FakeOrderMapper mapper = new FakeOrderMapper();
+        OrderImportService svc = new OrderImportService(mapper);
+        svc.importLines(List.of(OrderImportService.HEADER, "A1,1,P,1"));
+
+        OrderImportJob job = new OrderImportJob(loc -> List.of(OrderImportService.HEADER, "A1,1,P,2"), svc);
+        job.run(new DefaultApplicationArguments("--input=orders.csv"));
+        assertThat(job.getExitCode()).isEqualTo(OrderImportJob.CONFLICT).isEqualTo(6);
+
+        // 形式エラーもあるときは、内容の違う重複（6）を優先する
+        OrderImportJob both = new OrderImportJob(loc -> List.of(OrderImportService.HEADER, "A1,1,P,3", "bad"), svc);
+        both.run(new DefaultApplicationArguments("--input=orders.csv"));
+        assertThat(both.getExitCode()).isEqualTo(6);
+
+        // 同じ内容の重複（再実行）は 0 のまま
+        OrderImportJob rerun = new OrderImportJob(loc -> List.of(OrderImportService.HEADER, "A1,1,P,1"), svc);
+        rerun.run(new DefaultApplicationArguments("--input=orders.csv"));
+        assertThat(rerun.getExitCode()).isZero();
+    }
+
+    @Test
     void exitCodeEightWhenInputMissingOrUnreadable() {
         OrderImportJob noArg = new OrderImportJob(loc -> List.of(), service);
         noArg.run(new DefaultApplicationArguments());

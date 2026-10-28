@@ -60,6 +60,17 @@ class MemberServiceTest {
     }
 
     @Test
+    void register_duplicateErrorDoesNotCarryEmail() {
+        // 後退: 409 の応答（メッセージの埋め込み値）に、入力したメールアドレスをそのまま入れていた
+        service.register("A", "a@example.com");
+
+        assertThatThrownBy(() -> service.register("B", "a@example.com"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> assertThat(((BusinessException) e).getArgs()).isEmpty())
+                .satisfies(e -> assertThat(e.getMessage()).doesNotContain("a@example.com"));
+    }
+
+    @Test
     void register_concurrentDuplicateBecomesBusinessError() {
         // 事前の確認をすり抜けた（同時に登録された）ケース: DB の一意制約で失敗しても 409 の業務エラーにする
         MemberMapper racing = new InMemoryMapper() {

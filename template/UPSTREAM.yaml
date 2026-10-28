@@ -9,7 +9,7 @@
 #   3. 下の sha を写し元の main のコミットに更新し、もう一度 python scripts/check_template_drift.py が通ることを確かめる
 # このため .github/dependabot.yml の template の gradle は、写し元と揃える依存（keep_in_sync の対象）を ignore にしている。
 repo: shoyo-maya-bot/dev-environment
-sha: e5705d7945cc49ae8cfbae6bcc098b454c9f6197
+sha: 7c8156086595f0b06235997d91eac6ac6d1a9d5a
 
 # 写し元のディレクトリ → template 内のディレクトリ
 mappings:
@@ -55,6 +55,20 @@ allowed_differences:
       - from: "name: sample-app"
         to: "name: app"
     reason: アプリ名を汎用名にしている（settings.gradle と同じ理由）
+  - path: Dockerfile
+    kind: replace
+    replace:
+      - from: "# sample-app のコンテナイメージの例（ECS Fargate の API・バッチ用. cloud/README.md の"
+        to: "# app のコンテナイメージの例（ECS Fargate の API・バッチ用. dev-environment の cloud/README.md の"
+      - from: "docker build -t sample-app:0.1.0 ."
+        to: "docker build -t app:0.1.0 ."
+      - from: "ARG JAR_FILE=build/libs/sample-app-0.1.0.jar"
+        to: "ARG JAR_FILE=build/libs/app-0.1.0.jar"
+      - from: "バッチのジョブフロー（cloud/modules/batch-workflow）"
+        to: "バッチのジョブフロー（dev-environment の cloud/modules/batch-workflow）"
+    reason: >-
+      イメージ名と jar 名をプロジェクト名（settings.gradle の 'app'）に合わせている。
+      template には cloud/ を持ち込まないので、案内先を dev-environment の手順書・モジュールと明記している
   - path: local/docker-compose.yml
     kind: replace
     replace:
@@ -72,11 +86,10 @@ allowed_differences:
     reason: >-
       template には local/README.md を持ち込まない（下の removed）ので、案内先を dev-environment の手順書と明記している
   - path: src/main/java/com/example/app/AppApplication.java
-    kind: replace
-    replace:
-      - from: サンプルアプリの起動クラス.
-        to: アプリの起動クラス.
-    reason: 起動クラスの説明からサンプル固有の言い回しを外している
+    kind: modified
+    reason: >-
+      起動クラスの説明からサンプル固有の言い回しを外している（「サンプルアプリの起動クラス.」→「アプリの起動クラス.」）。
+      また D2（Checkstyle）の行長制限に収めるため、batchRequested の呼び出しの 1 行を折り返している（処理は同じ）
   - path: src/main/java/com/example/app/common/ErrorResponse.java
     kind: modified
     reason: >-
@@ -84,7 +97,7 @@ allowed_differences:
       写し元には SpotBugs が無いので入っていない
   - path: src/main/java/com/example/app/order/ImportResult.java
     kind: modified
-    reason: ErrorResponse と同じ（D5 の EI_EXPOSE_REP 対策の防御的コピー）
+    reason: ErrorResponse と同じ（D5 の EI_EXPOSE_REP 対策で、errors・conflicts をコンパクトコンストラクタで List.copyOf して防御的コピーにしている）
   - path: src/main/java/com/example/app/order/batch/S3Config.java
     kind: modified
     reason: D2（Checkstyle）の行長制限に収めるため、長い 1 行を折り返している（処理は同じ）
@@ -94,6 +107,26 @@ allowed_differences:
       S3Config と同じ（D2 の行長制限）。コンストラクタの引数と、decodeUtf8 の Javadoc の 1 行を折り返している（処理は同じ）。
       また D5（SpotBugs）の CT_CONSTRUCTOR_THROW（上限の検査でコンストラクタが例外を投げる）に対し、除外ではなく
       SpotBugs の推奨どおりクラスを final にしている（継承されない Bean。写し元には SpotBugs が無い）
+  - path: src/main/java/com/example/app/order/OrderImportService.java
+    kind: modified
+    reason: >-
+      D2（Checkstyle）に合わせている。内容の違う重複のメッセージを作る長い 1 行を折り返し、
+      splitCsv（循環的複雑度 19 > 上限 12）を、引用符で囲んだ値・囲まない値を読む小さなメソッドに分けている
+      （分け方だけで、受け付ける形・例外のメッセージは同じ。OrderImportServiceTest で確かめる）
+  - path: src/test/java/com/example/app/AppApplicationTest.java
+    kind: modified
+    reason: >-
+      D2（Checkstyle）のメソッド名の規約（英小文字始まり）に合わせ、日本語のメソッド名を英語にして
+      元の名前を @DisplayName に移している。長い 1 行も変数に分けて折り返している（検証の内容は同じ）
+  - path: src/test/java/com/example/app/order/OrderImportServiceTest.java
+    kind: modified
+    reason: >-
+      D6〜D8（spec-trace）で parseRejects の結果を照合するため、@ParameterizedTest に name（メソッド名で始まる）を付けている。
+      同じ引数名（line, message）のパラメータ化テストが 2 つあり、既定の表示名「[番号] line = …, message = …」では見分けられないため。
+      写し元には spec-trace が無い
+  - path: src/test/java/com/example/app/order/batch/OrderImportJobRegistrationTest.java
+    kind: modified
+    reason: D2（Checkstyle）の行長制限に収めるため、値の配列と Map を変数に分けて折り返している（検証の内容は同じ）
   - path: src/test/java/com/example/app/order/batch/S3ConfigTest.java
     kind: modified
     reason: S3Config と同じ（D2 の行長制限）。URL を作る式を変数に分けて折り返している（検証の内容は同じ）

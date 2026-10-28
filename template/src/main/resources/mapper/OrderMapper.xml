@@ -9,6 +9,17 @@
     ON CONFLICT (order_no) DO NOTHING
   </insert>
 
+  <!-- 同じ注文番号・同じ内容の行があるか（内容の違う重複を見分ける） -->
+  <select id="existsSame" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM orders
+      WHERE order_no = #{orderNo}
+        AND member_id = #{memberId}
+        AND product_code = #{productCode}
+        AND quantity = #{quantity}
+    )
+  </select>
+
   <select id="memberExists" resultType="boolean">
     SELECT EXISTS (SELECT 1 FROM member WHERE id = #{memberId})
   </select>

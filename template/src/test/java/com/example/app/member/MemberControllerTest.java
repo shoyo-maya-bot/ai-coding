@@ -1,5 +1,6 @@
 package com.example.app.member;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -12,6 +13,7 @@ import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
@@ -54,6 +56,32 @@ class MemberControllerTest {
         mvc.perform(get("/api/v1/members/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("yamada@example.com"));
+    }
+
+    @Test
+    void duplicateEmailReturns409WithoutTheAddress() throws Exception {
+        // 後退: 409 の message に「（yamada@example.com）」とメールアドレスを入れて返していた
+        ResourceBundleMessageSource real = new ResourceBundleMessageSource();
+        real.setBasename("messages");
+        real.setDefaultEncoding("UTF-8");
+        LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
+        validator.afterPropertiesSet();
+        MockMvc withRealMessages = MockMvcBuilders
+                .standaloneSetup(new MemberController(new MemberService(new MemberServiceTest.InMemoryMapper())))
+                .setControllerAdvice(new ApiExceptionHandler(real))
+                .setValidator(validator)
+                .build();
+        String body = "{\"name\":\"山田\",\"email\":\"yamada@example.com\"}";
+        withRealMessages.perform(post("/api/v1/members").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        String response = withRealMessages
+                .perform(post("/api/v1/members").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.messageId").value("APPE0003"))
+                .andExpect(jsonPath("$.message").value("このメールアドレスでは登録できません。"))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(response).doesNotContain("yamada@example.com").doesNotContain("yamada");
     }
 
     @Test

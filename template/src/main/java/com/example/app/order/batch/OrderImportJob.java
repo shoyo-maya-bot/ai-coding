@@ -11,6 +11,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.ExitCodeGenerator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,17 +19,25 @@ import org.springframework.stereotype.Component;
  *
  * <p>起動例: {@code --spring.profiles.active=local,batch --app.batch.job=JOB0001 --input=s3://sample-bucket/orders.csv}
  *
- * <p>終了コード: 0 正常 / 4 形式エラーの行あり（取込は続行）/ 8 異常終了。実案件では運用設計の終了コード体系に合わせる。
+ * <p>終了コード: 0 正常 / 4 形式エラーの行あり（取込は続行）/ 6 内容の違う重複あり（その行は取り込まずに続行. 人が確かめる）/ 8 異常終了。
+ * 4 と 6 の両方に当たるときは 6。実案件では運用設計の終了コード体系に合わせる。
  * ジョブ ID の誤り・未指定は {@link com.example.app.batch.BatchJobGuard} が 8 にする。
+ *
+ * <p>プロファイル batch のときだけ登録する。API（Web）として起動したときに {@code --app.batch.job=JOB0001} が
+ * 付いていても、取込は走らない（API の起動のついでに取込が走る・終了コードが返らない、を防ぐ）。
  *
  * <p>入力は全体をメモリに読み（上限 {@code app.batch.max-input-bytes}。{@link DefaultFileFetcher}）、ファイル全体を 1 トランザクションで登録する
  * （local/README.md の「取込の大きさとコミットの単位」）。
  */
+@Profile("batch")
 @Component
 @ConditionalOnProperty(name = "app.batch.job", havingValue = "JOB0001")
 public class OrderImportJob implements BatchJob, ApplicationRunner, ExitCodeGenerator {
 
     static final String JOB_ID = "JOB0001";
+
+    /** 終了コード: 内容の違う重複あり（その行は取り込まずに続行した. 形式エラーの 4 より優先）. */
+    public static final int CONFLICT = 6;
 
     private static final Logger log = LoggerFactory.getLogger(OrderImportJob.class);
 
@@ -58,9 +67,10 @@ public class OrderImportJob implements BatchJob, ApplicationRunner, ExitCodeGene
         try {
             ImportResult r = service.importLines(fetcher.readLines(input.get(0)));
             r.errors().forEach(e -> log.warn("{} {}", MessageIds.IMPORT_LINE_SKIPPED, e));
-            log.info("{} JOB0001 終了 imported={} duplicated={} errors={}",
-                    MessageIds.IMPORT_FINISHED, r.imported(), r.duplicated(), r.errors().size());
-            exitCode = r.hasErrors() ? WARN : OK;
+            r.conflicts().forEach(c -> log.warn("{} {}", MessageIds.IMPORT_CONFLICT, c));
+            log.info("{} JOB0001 終了 imported={} duplicated={} errors={} conflicts={}",
+                    MessageIds.IMPORT_FINISHED, r.imported(), r.duplicated(), r.errors().size(), r.conflicted());
+            exitCode = r.hasConflicts() ? CONFLICT : r.hasErrors() ? WARN : OK;
         } catch (Exception e) {
             log.error("{} JOB0001 異常終了", MessageIds.BATCH_FAILED, e);
             exitCode = ERROR;

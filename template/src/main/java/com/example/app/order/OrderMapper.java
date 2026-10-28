@@ -13,6 +13,14 @@ public interface OrderMapper {
      */
     int insertIfAbsent(Order order);
 
+    /**
+     * 同じ注文番号で、内容（会員・商品・数量）も同じ注文が登録済みか.
+     *
+     * <p>{@link #insertIfAbsent} が 0 件だったときに、再実行による重複（同じ内容）か、
+     * 内容の違う重複（別の注文に同じ番号が付いた・訂正が来たなど）かを分けるために使う。
+     */
+    boolean existsSame(Order order);
+
     /** 会員が存在するか（外部キー違反で取込全体が取り消されないよう、登録の前に確かめる）. */
     boolean memberExists(long memberId);
 }
