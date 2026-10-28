@@ -18,6 +18,9 @@
 - D4 の閾値を外から下げていない（gradle.properties・verify-gates・ワークフローの -PbranchCoverageMinimum /
   ORG_GRADLE_PROJECT_branchCoverageMinimum、この実行の環境変数）
 - verify-gates・ワークフローで、ゲートのタスクを -x / --exclude-task で外していない
+- verify-gates・ワークフローで、spec-trace（D6〜D8・D10）を弱めていない
+  - --min-asserts を 1 未満（0 や変数・式）にしていない（アサーションの無いテストが D7 を通る）
+  - verify-gates.sh / .ps1 の spec_trace check から --enforce-drift・--require・--test-results を外していない
 - D2・D5 の設定ファイル（checkstyle.xml・spotbugs の exclude.xml）が基準（traceability/gate-config-baseline.yaml）
   より弱くない（モジュールの削除・設定の変更・抑止のフィルタ・除外の追加・設定ファイルの差し替え）
 
@@ -270,6 +273,7 @@ def check_gate_strength(root: Path, gradle_tasks: set[str]) -> list[str]:
         errors
         + check_coverage_overrides(root, floor or MIN_BRANCH_COVERAGE)
         + check_excluded_tasks(root, gradle_tasks)
+        + check_spec_trace_args(root)
         + check_tool_configs(root, code)
     )
 
@@ -296,6 +300,61 @@ def check_excluded_tasks(root: Path, gradle_tasks: set[str]) -> list[str]:
                     f"ゲートの弱体化: {f.relative_to(root).as_posix()}:{_line(text, m.start())}: -x {m.group(1)}"
                     "（そのゲートが実行されない）"
                 )
+    return errors
+
+
+_MIN_ASSERTS = re.compile(r"--min-asserts(?:\s*=\s*|\s+)(['\"]?)([^\s'\"`]*)\1")
+# verify-gates の spec_trace check に必ず付ける引数（D8 の設計書が無いときの失敗・要件の状態・テストの実行結果）
+SPEC_TRACE_REQUIRED_ARGS = ("--enforce-drift", "--require", "--test-results")
+
+
+def _code_lines(text: str) -> str:
+    """行コメント（# で始まる行）を空行にする（行番号は保つ）."""
+    return "\n".join("" if ln.lstrip().startswith("#") else ln for ln in text.split("\n"))
+
+
+def _spec_trace_commands(text: str) -> list[tuple[int, str]]:
+    """spec_trace check の呼び出し（行末の \\ や ` の継続行をつなげたもの）と、その位置."""
+    out = []
+    for m in re.finditer(r"(?:spec_trace|spec-trace)\s+check\b", text):
+        end = m.end()
+        while True:
+            nl = text.find("\n", end)
+            if nl == -1:
+                end = len(text)
+                break
+            if text[end:nl].rstrip().endswith(("\\", "`")):
+                end = nl + 1
+                continue
+            end = nl
+            break
+        out.append((m.start(), text[m.start() : end]))
+    return out
+
+
+def check_spec_trace_args(root: Path) -> list[str]:
+    """ゲートを実行する経路で、spec-trace（D6〜D8・D10）の引数を弱めていないか."""
+    errors: list[str] = []
+    for f in _gate_runner_files(root):
+        rel = f.relative_to(root).as_posix()
+        text = _code_lines(f.read_text(encoding="utf-8-sig"))
+        for m in _MIN_ASSERTS.finditer(text):
+            value = m.group(2)
+            if not value.isdigit() or int(value) < 1:
+                errors.append(
+                    f"ゲートの弱体化: {rel}:{_line(text, m.start())}: spec-trace の --min-asserts {value or '（空）'}"
+                    "（リテラルの 1 以上にする。アサーションの無いテストが D7 を通る）"
+                )
+        if f.name.startswith("verify-gates."):
+            commands = _spec_trace_commands(text)
+            if not commands:
+                errors.append(f"ゲートの弱体化: {rel} に spec_trace check がありません（D6〜D8・D10 が実行されない）")
+            for pos, cmd in commands:
+                for arg in SPEC_TRACE_REQUIRED_ARGS:
+                    if not re.search(rf"(?<![\w-]){re.escape(arg)}(?![\w-])", cmd):
+                        errors.append(
+                            f"ゲートの弱体化: {rel}:{_line(text, pos)}: spec_trace check に {arg} がありません"
+                        )
     return errors
 
 

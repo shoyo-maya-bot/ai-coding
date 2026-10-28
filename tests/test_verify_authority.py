@@ -152,6 +152,48 @@ class GateStrengthTest(RepoCopy):
         (self.tmp / "scripts/verify-gates.sh").write_text("./gradlew qualityGate -x spotbugsMain\n", encoding="utf-8")
         self.assert_weakened("verify-gates.sh", "-x spotbugsMain")
 
+    # --- 第 8 回の指摘: verify-gates の spec-trace の引数（--min-asserts 0 など）を検出していなかった ---
+
+    def test_min_asserts_zero_in_verify_gates_sh(self):
+        self.edit("scripts/verify-gates.sh", "--enforce-drift", "--min-asserts 0 --enforce-drift")
+        self.assert_weakened("verify-gates.sh", "--min-asserts 0")
+
+    def test_min_asserts_zero_in_verify_gates_ps1_with_equals(self):
+        self.edit("scripts/verify-gates.ps1", "--enforce-drift", "--min-asserts=0 --enforce-drift")
+        self.assert_weakened("verify-gates.ps1", "--min-asserts 0")
+
+    def test_min_asserts_variable_in_workflow(self):
+        wf = self.tmp / ".github/workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text(
+            "jobs:\n  t:\n    steps:\n      - run: python -m spec_trace check x --min-asserts $N\n", encoding="utf-8"
+        )
+        self.assert_weakened("ci.yml", "--min-asserts $N")
+
+    def test_min_asserts_raised_or_in_comment_is_fine(self):
+        self.edit("scripts/verify-gates.sh", "--enforce-drift", "--min-asserts 2 --enforce-drift")
+        self.edit("scripts/verify-gates.sh", "# gate: trace", "# --min-asserts 0 にしない\n# gate: trace")
+        self.assertEqual(self.errors(), [])
+
+    def test_required_spec_trace_args_removed(self):
+        for arg in verify_authority.SPEC_TRACE_REQUIRED_ARGS:
+            with self.subTest(arg=arg):
+                original = (self.tmp / "scripts/verify-gates.sh").read_text(encoding="utf-8")
+                cut = original.replace(f" {arg}", " --x-removed", 1)
+                self.assertNotEqual(cut, original)
+                (self.tmp / "scripts/verify-gates.sh").write_text(cut, encoding="utf-8")
+                self.assert_weakened("verify-gates.sh", f"に {arg} がありません")
+                (self.tmp / "scripts/verify-gates.sh").write_text(original, encoding="utf-8")
+
+    def test_required_arg_on_continuation_line_of_ps1(self):
+        # ps1 は --test-results を ` の継続行に書いている. 継続行を外すと検出する
+        self.edit("scripts/verify-gates.ps1", "--require $require `", "--require $require")
+        self.assert_weakened("verify-gates.ps1", "--test-results")
+
+    def test_spec_trace_removed_from_verify_gates(self):
+        self.edit("scripts/verify-gates.sh", "spec_trace check", "spec_trace_disabled")
+        self.assert_weakened("verify-gates.sh", "spec_trace check がありません")
+
     def test_spotbugs_removed_from_quality_gate(self):
         self.edit(
             "template/build.gradle",
