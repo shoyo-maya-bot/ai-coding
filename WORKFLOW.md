@@ -66,6 +66,7 @@ AI は次のどれかで自動修正をやめ、各回の修正内容・エラ�
 |---|---|
 | `verify-gates` の表で FAIL | その行のゲートの出力を読む。D6〜D8・D10 は spec-trace のメッセージに要件 ID が出る |
 | `trace.spec_drift` | 承認後に設計書が変わった。差分を確かめ、影響する要件を pending に戻す。直したあとの `spec-trace pin` は人がレビュー後に行う |
+| `template drift` の FAIL | `template/` が写し元（`template/UPSTREAM.yaml` の `repo`・`sha`）と、理由を書いた差分以外でずれた。パッケージ名を変えた・`common/` を差し替えたなら UPSTREAM.yaml の `rename`・`allowed_differences` を直す（README の「実案件で使う」）。`git fetch` で失敗しているならネットワークに出られていない |
 | reviewer の判定表の「要確認」 | AI が設計書だけでは決められなかった点。人が決めて、必要なら設計書を直す |
 | PR の AI レビュー（auto-review を入れた場合） | 下書き。「検証済み」の MUST から見る。却下された指摘は折りたたまれている（[agent-lab/auto-review](https://github.com/shoyo-maya-bot/agent-lab/tree/main/auto-review)） |
 
