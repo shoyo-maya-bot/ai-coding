@@ -120,6 +120,28 @@ jobs:
             gates.log
           if-no-files-found: ignore
 
+  # 対応版の下限（tools/*/pyproject.toml の requires-python = ">=3.10"、README の「Python 3.10 以上」）でも
+  # ツール・スクリプトが動くことを確かめる. Java のゲートと template drift は gates ジョブ（3.12）で見る
+  python-min:
+    name: tools tests, D11, docs (Python 3.10)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: install (constraints.txt で版を固定)
+        run: python -m pip install -e "tools/spec-trace[dev]" -e "tools/test-scaffold[dev]" pyyaml -c constraints.txt
+      - name: tools tests
+        run: python -m pytest -q tools/spec-trace/tests tools/test-scaffold/tests tests
+      - name: D11 authority
+        run: python scripts/verify_authority.py
+      - name: docs
+        run: python scripts/check_docs.py
+
   security:
     name: security (bandit, pip-audit)
     runs-on: ubuntu-latest

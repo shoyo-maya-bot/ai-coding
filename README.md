@@ -34,7 +34,7 @@
 
 ## すぐ試す（同梱のサンプルで）
 
-前提: [dev-environment](https://github.com/shoyo-maya-bot/dev-environment) のローカル環境（Java 17・Rancher Desktop）と Python 3.10 以上（CI は 3.12）。
+前提: [dev-environment](https://github.com/shoyo-maya-bot/dev-environment) のローカル環境（Java 17・Rancher Desktop）と Python 3.10 以上（CI は全ゲートを 3.12 で、ツールのテスト・D11・docs を下限の 3.10 でも実行）。
 
 ```bash
 git clone https://github.com/shoyo-maya-bot/ai-coding.git
@@ -51,7 +51,16 @@ git config core.hooksPath .githooks        # push の前にドキュメントの
 ## 実案件で使う
 
 1. このリポジトリを会社の GitHub に複製する
-2. `template/` の `com.example.app` を自分たちのパッケージに、`common/` を社内の共通ライブラリに置き換える
+2. `template/` の `com.example.app` を自分たちのパッケージに、`common/` を社内の共通ライブラリに置き換える。
+   **置き換えるだけだと verify-gates の `template drift` と `D11 authority` が必ず落ちる** ので、同じ変更で次も直す
+   - [template/UPSTREAM.yaml](template/UPSTREAM.yaml) の `rename` の `to:`（`com.example.app`・`com/example/app`）を自分たちのパッケージに。
+     `common/` を消した・差し替えたファイルは `allowed_differences` に `kind: removed` / `modified` と理由を書く
+     （写し元と比べて、ここに無い差分があると `template drift` が失敗する）
+   - `scripts/verify_authority.py` の `REQUIRED_COVERAGE_TARGETS`（D4 の対象。`com/example/app/**/*Service.class` など）のパッケージ
+   - test-scaffold を使うなら、設定ファイルの `java.package`（既定 `com.example.app`）
+   - `template drift` は写し元（UPSTREAM.yaml の `repo`。既定は GitHub の `shoyo-maya-bot/dev-environment`）を
+     **git で取得するので、ネットワークが要る**。GitHub に出られない環境では、写し元を社内に複製して `repo` を
+     その URL か手元の絶対パスにする（手元の checkout と比べるだけなら `python scripts/check_template_drift.py --upstream-dir <パス>`）
 3. 設計書リポジトリを隣に clone し、[context-sources.yaml](context-sources.yaml) の `roots` を書き換える（CI での D8 は [設計書を別リポジトリに置くとき](guidelines/quality-gates.md#設計書を別リポジトリに置くときd8)）
 4. `guidelines/` をチームの規約に合わせて直す（`traceability/authority.yaml` も合わせて直し、D11 を通す）
 5. `samples/` と `traceability/specs/` のサンプルを消し、1 本目の設計書でフェーズ 1 から始める
@@ -67,7 +76,8 @@ ai-coding/
 │   ├── prompts/                  # /ai-plan … /ai-pr、/ai-test-scaffold、/ai-status、/incident-investigate
 │   ├── instructions/             # ファイルの種類ごとのルール（Java・テスト・Mapper）
 │   ├── skills/                   # 圧縮したドメイン知識（メッセージ ID・Mapper・バッチ）
-│   └── workflows/ci.yml          # D1〜D11
+│   ├── dependabot.yml            # Actions・Gradle・pip（tools/ の 2 つ）の更新を月 1 回提案
+│   └── workflows/                # ci（D1〜D11・Python 3.10・security）、codeql、deps-lock、spec-pin、template-drift
 ├── guidelines/                   # ルールの唯一の正
 ├── template/                     # 生成先の Spring Boot プロジェクト（品質ゲート入り）
 ├── traceability/
@@ -76,7 +86,7 @@ ai-coding/
 │   └── gate-config-baseline.yaml # D2・D5 の設定（checkstyle.xml・exclude.xml）の基準（D11 が弱体化を検出）
 ├── tools/spec-trace/             # 対応表の検証ツール
 ├── tools/test-scaffold/          # Excel のテスト仕様書 → JUnit 5 のテストの雛形
-├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs、check_template_drift
+├── scripts/                      # verify-gates（CI と同じ順）、verify_authority、check_docs、check_template_drift、check_spec_pin
 ├── samples/design-docs/          # 架空の設計書（Front Matter の id で参照）
 ├── samples/ci/                   # 設計書を別リポジトリに置くときの CI の例
 ├── eval/                         # 評価ループ（ラン記録・指標）
@@ -111,7 +121,8 @@ D10 の Karate シナリオは CI では実行しません（起動中のアプ�
   `gradle.properties`・実行時の環境変数での引き下げを error にします
 - D11 は同じく、`qualityGate` の `dependsOn` からゲート（`spotbugsMain` など）を外す、`ignoreFailures`・`failOnViolation`・
   `maxWarnings`・ゲートのタスクの `enabled` をリテラルの `false`・`true`・`0`・`true` 以外にする（`!false` などの式も）、
-  ゲートのタスクに `onlyIf` を付ける、も検出します
+  ゲートのタスクに `onlyIf` を付ける、verify-gates・ワークフローで spec-trace の `--min-asserts` を 1 未満にする・
+  verify-gates の `spec_trace check` から `--enforce-drift`・`--require`・`--test-results` を外す、も検出します
 - D2・D5 の設定ファイル（`checkstyle.xml`・`exclude.xml`）も、基準（`traceability/gate-config-baseline.yaml`）より弱くすると
   D11 が検出します。強める変更はそのまま通り、設定値の変更・除外の追加はレビューの承認後に
   `python scripts/verify_authority.py --write-baseline` で基準を同じ PR で更新します
@@ -139,6 +150,7 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10（第 8 回） | D11: verify-gates・ワークフローで spec-trace の `--min-asserts` を 1 未満（0・変数）にする、verify-gates の `spec_trace check` から `--enforce-drift`・`--require`・`--test-results` を外す、を検出。CI に Python 3.10 のジョブ（ツールのテスト・D11・docs）を追加。Dependabot の pip に `tools/test-scaffold` を追加。README の権限の説明・「実案件で使う」の手順（UPSTREAM.yaml・D11 の対象・ネットワーク）を実際に合わせた | `--min-asserts 0` などで D7 を弱めた verify-gates は D11 で落ちる。3.10 で動かない書き方は CI の `python-min` で落ちる |
 | 2026-10 | template を写し元（dev-environment 7c81560）に合わせた: 内容の違う重複を終了コード 6（APPW0002）で知らせる、CSV の引用符に対応、409 の応答にメールアドレスを入れない、ジョブ ID の照合を `@ConditionalOnProperty` と同じに（大文字小文字を区別しない）、バッチの起動失敗も終了コード 8、Dockerfile の例を追加。Checkstyle・spec-trace に合わせた差分は template/UPSTREAM.yaml に理由付きで記録 | 重複の内容が違う行は 4 ではなく 6 で終わる。APPE0003 の文言が変わる |
 | 2026-10（第 7 回） | D11: `ignoreFailures = !false` のような式・変数での弱体化（リテラル以外の値）、ゲートのタスクの `onlyIf { … }`、`checkstyle.xml` のモジュールの削除・設定の変更・抑止のフィルタ、SpotBugs の `exclude.xml` への除外の追加、`build.gradle` での設定ファイルの差し替えを検出（基準は `traceability/gate-config-baseline.yaml`）。test-scaffold の `--merge`: 項番を振り直した仕様書でも名前だけで照合せず、雛形の目印と観点で対応づける（項番が同じでも観点が違えば別のケースとして別名で足し、警告）。`--proofs-out` は既存のメソッドを既存の名前で書く | Checkstyle の設定値を変える・SpotBugs の除外を足す PR は、`--write-baseline` で基準も更新しないと D11 で落ちる。項番を振り直した仕様書で `--merge` すると、警告が出て（`--strict` なら終了コード 1）、新しいケースが `_2` 付きの名前で足される |
 | 2026-10（第 6 回） | D11: ゲートの弱体化を `ignoreFailures.set(true)`・`X.enabled = false`・`onlyIf { false }`・`tasks.withType(Test) { enabled = false }` の書き方でも検出。`test` タスクでのテストの除外・絞り込み、D4 の対象（`coverageTargets`）の縮小・除外、verify-gates・ワークフローの `-x <ゲート>` も検出。D9: Mapper インターフェースの `@Select` 等の `${}` も検出。spec-trace: 行頭から始まる複数行の呼び出しをテストの宣言とみなさない（アサーションの無いテストが D7 を素通りしていた）。Python の結果の照合で、ファイル名だけの一致は同名のテストファイルがほかに無いときだけ。devtools-common の固定を 04f3915 に | これらの書き方でゲートを弱めた template・アサーションの無いテストは D11・D9・D7 で落ちる。pytest の rootdir をテストのフォルダにしていて、同名のテストファイルが複数あると `trace.proof_not_run`（rootdir をリポジトリのルートにする） |
@@ -154,8 +166,18 @@ verify-gates の `docs` ゲートでは、ドキュメントと設定ファイ�
 | 2026-10 | spec-trace に `--test-results` を追加（CI と verify-gates で使用） | proven のテストが失敗・未実行・スキップなら D7 が落ちる |
 | 2026-10 | エージェントは `spec-trace pin`・`git push`・PR 作成を、人の承認後でも実行しない | 以前の「人の承認後にだけ行う」から変更（guidelines/workflow.md の「人だけが行うこと」） |
 
-CI の Actions はコミット SHA で固定し（横にバージョンを書く）、権限は `contents: read` だけにしています。
-更新は Dependabot（[.github/dependabot.yml](.github/dependabot.yml)）が月 1 回 PR で提案します。
+CI の Actions はコミット SHA で固定しています（横にバージョンを書く）。ワークフローの権限は既定を `contents: read` にし、
+書き込みが要るジョブにだけ、そのジョブの中で最小の権限を足しています。
+
+| ワークフロー（ジョブ） | 足している権限 | 理由 |
+|---|---|---|
+| deps-lock（lock） | `contents: write` | 作り直した `constraints.txt` を同じブランチにコミットして push する（main 以外のブランチだけ） |
+| template-drift（report） | `issues: write` | 写し元とのずれを Issue で知らせる・コメントを足す・閉じる |
+| codeql（analyze） | `security-events: write` | CodeQL の結果を GitHub に送る |
+
+ci・spec-pin は `contents: read` だけです。
+依存の更新は Dependabot（[.github/dependabot.yml](.github/dependabot.yml)）が月 1 回 PR で提案します
+（Actions、template の Gradle（写し元と揃える依存を除く）、`tools/spec-trace`・`tools/test-scaffold` の pip）。
 
 ## 関連リポジトリ
 

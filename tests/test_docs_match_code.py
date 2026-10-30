@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -118,6 +120,50 @@ class GateDocsTest(unittest.TestCase):
         self.assertIn(f"下限 {pct}", read("README.md"))
         build = read("template/build.gradle")
         self.assertIn(f"new BigDecimal('{verify_authority.MIN_BRANCH_COVERAGE}')", build)
+
+
+class RepoSettingsDocsTest(unittest.TestCase):
+    """第 8 回の指摘: README の権限・Dependabot・実案件の手順が実際の設定とずれていた."""
+
+    readme = read("README.md")
+
+    def test_workflow_permissions_match_readme(self):
+        documented = set()
+        for line in section(self.readme, "変更点").splitlines():
+            m = re.match(r"^\|\s*([\w-]+)（([\w-]+)）\s*\|\s*`([\w-]+): (\w+)`", line)
+            if m:
+                documented.add(m.groups())
+        actual = set()
+        for wf in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+            self.assertEqual(data.get("permissions"), {"contents": "read"}, f"{wf.name} の既定の権限")
+            for job_id, job in data["jobs"].items():
+                for perm, level in (job.get("permissions") or {}).items():
+                    if level != "read":
+                        actual.add((wf.stem, job_id, perm, level))
+        self.assertEqual(documented, actual)
+
+    def test_dependabot_covers_every_python_tool(self):
+        data = yaml.safe_load(read(".github/dependabot.yml"))
+        pip_dirs = {u["directory"] for u in data["updates"] if u["package-ecosystem"] == "pip"}
+        tools = {f"/{p.parent.relative_to(ROOT).as_posix()}" for p in (ROOT / "tools").glob("*/pyproject.toml")}
+        self.assertEqual(pip_dirs, tools)
+
+    def test_ci_runs_the_minimum_python(self):
+        m = re.search(r'^requires-python\s*=\s*">=\s*(3\.\d+)"', read("tools/spec-trace/pyproject.toml"), re.M)
+        self.assertIn(f'python-version: "{m.group(1)}"', read(".github/workflows/ci.yml"))
+        self.assertIn(f"下限の {m.group(1)} でも実行", self.readme)
+
+    def test_real_project_steps_name_what_hardcodes_the_package(self):
+        steps = section(self.readme, "実案件で使う")
+        upstream = yaml.safe_load(read("template/UPSTREAM.yaml"))
+        for r in upstream["rename"]:
+            if r["to"].startswith("com"):
+                self.assertIn(f"`{r['to']}`", steps)
+        self.assertIn("REQUIRED_COVERAGE_TARGETS", steps)
+        self.assertIn(verify_authority.REQUIRED_COVERAGE_TARGETS[0], steps)
+        self.assertIn(f"`{upstream['repo']}`", steps)
+        self.assertIn("--upstream-dir", steps)
 
 
 if __name__ == "__main__":

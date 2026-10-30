@@ -29,7 +29,7 @@ CI（`.github/workflows/ci.yml`）も同じスクリプトを呼ぶので、手�
 | D8 | 設計書ドリフト | 承認時の設計書ハッシュと一致。完了時（`--final` = `--require proven`）はハッシュの記録（pin）も必須 | `spec-trace check --enforce-drift`（`trace.spec_drift`・`trace.source_unpinned`） |
 | D9 | SQL の安全性 | Mapper XML と Mapper インターフェースの `@Select`・`@Insert`・`@Update`・`@Delete` に `${}` が無い（`@SelectProvider` など Java で組み立てる SQL はレビューで確かめる） | `verifyMapperSql` |
 | D10 | 結合シナリオ | 対応表のシナリオが実在し、`@ignore` でなく、`Then` / `match` がある（**実行はしない**。下の注） | `spec-trace check`（シナリオ） |
-| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures`・`failOnViolation`・`maxWarnings`・ゲートのタスクの `enabled` をリテラルの `false`・`true`・`0`・`true` 以外にする（`= true` のほか `!false`・`true || x`・変数・`Integer.MAX_VALUE` などの式も。`.set(…)`・`(…)` の書き方も）・ゲートのタスクの `onlyIf { … }`、`test` タスクでのテストの除外・絞り込み（karate 以外の `excludeTags` など）、D4 の下限の引き下げ・対象（`coverageTargets`）の縮小・除外）、D4 の閾値を外から下げていない、verify-gates・ワークフローでゲートを `-x` で外していない。D2・D5 の設定ファイル（`checkstyle.xml`・SpotBugs の `exclude.xml`）が基準（`traceability/gate-config-baseline.yaml`）より弱くない（モジュールの削除・設定の変更・抑止のフィルタ・`severity` の `ignore` / `info`・除外の追加・`build.gradle` での設定ファイルの差し替え） | `scripts/verify_authority.py` |
+| D11 | ルールの裏付け | 全ゲートに根拠ルールがあり、機械で確かめるルールにゲートがある。`build.gradle` でゲートが弱められていない（`qualityGate` の `dependsOn` からの除外・`ignoreFailures`・`failOnViolation`・`maxWarnings`・ゲートのタスクの `enabled` をリテラルの `false`・`true`・`0`・`true` 以外にする（`= true` のほか `!false`・`true || x`・変数・`Integer.MAX_VALUE` などの式も。`.set(…)`・`(…)` の書き方も）・ゲートのタスクの `onlyIf { … }`、`test` タスクでのテストの除外・絞り込み（karate 以外の `excludeTags` など）、D4 の下限の引き下げ・対象（`coverageTargets`）の縮小・除外）、D4 の閾値を外から下げていない、verify-gates・ワークフローでゲートを `-x` で外していない、spec-trace（D6〜D8・D10）を弱めていない（`--min-asserts` を 1 未満・変数にする、verify-gates の `spec_trace check` から `--enforce-drift`・`--require`・`--test-results` を外す）。D2・D5 の設定ファイル（`checkstyle.xml`・SpotBugs の `exclude.xml`）が基準（`traceability/gate-config-baseline.yaml`）より弱くない（モジュールの削除・設定の変更・抑止のフィルタ・`severity` の `ignore` / `info`・除外の追加・`build.gradle` での設定ファイルの差し替え） | `scripts/verify_authority.py` |
 
 D2・D5 の設定を強める変更（Checkstyle のモジュールを足す・SpotBugs の除外を減らす）は基準を直さずに通ります。
 Checkstyle の設定値を変える・SpotBugs の除外を足すときは、理由を書いてレビューで承認を得てから、
@@ -68,8 +68,10 @@ D8 は設計書の実物が無いと判定できません。CI では設計書�
 ### template の写し元とのずれ
 
 `template/` は dev-environment の `sample-app` を写したものです。写し元の commit とわざと違えている箇所（理由付き）を
-[template/UPSTREAM.yaml](../template/UPSTREAM.yaml) に書き、CI の `template-drift` ジョブ（`python scripts/check_template_drift.py`）が
-それ以外の差分を検出します。依存ライブラリの版は `build.gradle` の `keep_in_sync` で写し元に揃え続けます。
+[template/UPSTREAM.yaml](../template/UPSTREAM.yaml) に書き、verify-gates の `template drift` ゲート（`python scripts/check_template_drift.py`。
+CI の gates・windows ジョブでも実行）がそれ以外の差分を検出します。写し元は `repo` から git で取得するので、ネットワークが要ります
+（GitHub に出られない環境では `repo` を社内の複製の URL か手元の絶対パスにする）。週 1 回の `template-drift` ワークフローは、
+`--ref main` で写し元の最新との差を見て Issue で知らせるもので、PR の合否には使いません。依存ライブラリの版は `build.gradle` の `keep_in_sync` で写し元に揃え続けます。
 写し元を新しくするときは `--ref main` で差分を見てから取り込み、`sha` を更新します。
 
 ## 非決定論ゲート（AI レビュー。reviewer エージェントが判定表を出す）
